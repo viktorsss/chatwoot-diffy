@@ -10,6 +10,8 @@ services:
       - .:/app
     ports:
       - "8000:8000"
+    environment:
+      - OTEL_SERVICE_NAME=chatwoot-dify-web
     depends_on:
       db:
         condition: service_healthy
@@ -25,6 +27,8 @@ services:
     command: celery -A app.tasks worker --loglevel=info
     volumes:
       - .:/app
+    environment:
+      - OTEL_SERVICE_NAME=chatwoot-dify-worker
     depends_on:
       - redis
     env_file:
@@ -54,6 +58,15 @@ services:
       retries: 5
     ports:
       - "6380:6379"
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"  # UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
 
 volumes:
   postgres_data: 
