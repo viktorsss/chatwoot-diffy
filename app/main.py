@@ -1,9 +1,9 @@
 from fastapi import FastAPI
+
 from .api import webhooks
 from .database import engine
-from .models.database import Dialogue, SQLModel
+from .models.database import SQLModel
 from .telemetry import setup_telemetry
-from . import config
 
 SQLModel.metadata.create_all(bind=engine)
 
