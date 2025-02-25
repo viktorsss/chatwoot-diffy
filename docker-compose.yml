@@ -12,6 +12,9 @@ services:
       - "8000:8000"
     environment:
       - OTEL_SERVICE_NAME=chatwoot-dify-web
+      - DEBUG=False  # Force this to be False
+      - DB_HOST=db   # Force the host
+      - DB_PORT=5432 # Force the port
     depends_on:
       db:
         condition: service_healthy
@@ -29,6 +32,7 @@ services:
       - .:/app
     environment:
       - OTEL_SERVICE_NAME=chatwoot-dify-worker
+      
     depends_on:
       - redis
     env_file:
