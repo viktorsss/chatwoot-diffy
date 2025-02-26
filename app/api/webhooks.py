@@ -187,7 +187,7 @@ async def update_labels(
         )
 
 
-@router.post("/update_custom_attributes")
+@router.post("/update_custom_attributes/{conversation_id}")
 async def update_custom_attributes(
     conversation_id: int,
     custom_attributes: Dict[str, Any],
@@ -201,9 +201,7 @@ async def update_custom_attributes(
     - custom_attributes: Dictionary of custom attributes to set (request body)
 
     Example request body:
-        {
-            "team": "mobilization"
-        }
+    {"region": "Moscow"}
     """
     try:
         result = await chatwoot.update_custom_attributes(
