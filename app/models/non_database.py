@@ -7,3 +7,9 @@ class ConversationPriority(str, Enum):
     MEDIUM = "medium"
     LOW = "low"
     NONE = None
+
+
+class ConversationStatus(str, Enum):
+    OPEN = "open"
+    RESOLVED = "resolved"
+    PENDING = "pending"

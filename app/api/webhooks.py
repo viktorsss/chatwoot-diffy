@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from .. import tasks
 from ..database import get_db
 from ..models.database import ChatwootWebhook, Dialogue, DialogueCreate
-from ..models.non_database import ConversationPriority
+from ..models.non_database import ConversationPriority, ConversationStatus
 from .chatwoot import ChatwootHandler
 
 logger = logging.getLogger(__name__)
@@ -78,10 +78,7 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
         if webhook_data.sender_type == "agent_bot":
             logger.info(f"Skipping agent_bot message: {webhook_data.content}")
             return {"status": "skipped", "reason": "agent_bot message"}
-        if webhook_data.message_type == "incoming" and webhook_data.status in [
-            "pending",
-            "open",
-        ]:
+        if webhook_data.message_type == "incoming" and webhook_data.status == "pending":
             try:
                 dialogue_data = webhook_data.to_dialogue_create()
                 dialogue = await get_or_create_dialogue(db, dialogue_data)
@@ -180,7 +177,7 @@ async def update_custom_attributes(
     - custom_attributes: Dictionary of custom attributes to set (request body)
 
     Example request body:
-    {"region": "Moscow"}
+    {"region": "Moscow", "region_original_string": "Moscow"}
     """
     try:
         result = await chatwoot.update_custom_attributes(
@@ -289,8 +286,7 @@ async def assign_conversation_to_team(
         # Log the attempt
         logger.info(f"Attempting to assign conversation {conversation_id} to team {team}")
 
-        # For now, hardcode team_id to 3. In future, resolve team name to ID
-        team_id = 3
+        team_id = 0  # TODO: Remove hardcode
         result = await chatwoot.assign_team(conversation_id=conversation_id, team_id=team_id)
 
         # Log successful result
@@ -314,4 +310,37 @@ async def assign_conversation_to_team(
                 "attempted_team": team,
                 "attempted_team_id": team_id,
             },
+        ) from e
+
+
+@router.post("/toggle-status/{conversation_id}")
+async def toggle_conversation_status(
+    conversation_id: int,
+    status: ConversationStatus = Body(..., embed=True),
+    db: Session = Depends(get_db),
+):
+    """
+    Toggle the status of a Chatwoot conversation
+
+    Parameters:
+    - conversation_id: The ID of the conversation to update (path parameter)
+    - status: Status to set (request body)
+
+    Example request body:
+        {
+            "status": "open"
+        }
+    """
+    try:
+        result = await chatwoot.toggle_status(conversation_id=conversation_id, status=status.value)
+        return {
+            "status": "success",
+            "conversation_id": conversation_id,
+            "result": result,
+        }
+    except Exception as e:
+        logger.exception(f"Failed to toggle status for conversation {conversation_id}:")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": str(e), "conversation_id": conversation_id},
         ) from e

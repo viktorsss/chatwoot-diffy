@@ -112,7 +112,7 @@ def handle_dify_response(dify_result: Dict[str, Any], conversation_id: int, dial
                 dialogue.dify_conversation_id = dify_response_data.conversation_id
                 db.commit()
 
-        # Send message back to Chatwoot
+        # Send message back to Chatwoot. Sync is okay because we use separate instance of ChatwootHandler
         chatwoot.send_message_sync(
             conversation_id=conversation_id,
             message=dify_response_data.answer,
@@ -131,6 +131,7 @@ def handle_dify_error(request: Dict[str, Any], exc: Exception, traceback: str, c
     logger.debug(f"Failed request: {request}")
     logger.debug(f"Traceback: {traceback}")
 
+    # Send message back to Chatwoot. Sync is okay because we use separate instance of ChatwootHandler
     chatwoot = ChatwootHandler()
     chatwoot.send_message_sync(
         conversation_id=conversation_id,

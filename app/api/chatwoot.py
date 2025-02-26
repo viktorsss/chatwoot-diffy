@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import httpx
 
@@ -48,34 +48,6 @@ class ChatwootHandler:
                 return response.json()
         except Exception as e:
             logger.error(f"Failed to send message to conversation {conversation_id}: {e}")
-            raise
-
-    async def update_conversation_status(
-        self,
-        conversation_id: int,
-        status: str,
-        priority: Optional[str] = None,
-        snoozed_until: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Update conversation status and attributes
-        Valid statuses: 'open', 'resolved', 'pending', 'snoozed'
-        """
-        url = f"{self.conversations_url}/{conversation_id}"
-        data = {"status": status, "priority": priority, "snoozed_until": snoozed_until}
-        data = {k: v for k, v in data.items() if v is not None}
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.patch(url, json=data, headers=self.headers)
-                response.raise_for_status()
-                return response.json()
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Status update failed for conversation {conversation_id}:\n"
-                f"URL: {url}\nStatus: {e.response.status_code}\n"
-                f"Response: {e.response.text}\nPayload: {data}",
-                exc_info=True,
-            )
             raise
 
     async def add_labels(self, conversation_id: int, labels: List[str]) -> Dict[str, Any]:
@@ -183,12 +155,12 @@ class ChatwootHandler:
             response.raise_for_status()
             return response.json()
 
-    async def assign_team(self, conversation_id: int, team_id: int = 3) -> Dict[str, Any]:
+    async def assign_team(self, conversation_id: int, team_id: int = 0) -> Dict[str, Any]:
         """Assign a conversation to a team.
 
         Args:
             conversation_id: The ID of the conversation to assign
-            team_id: The ID of the team to assign to (defaults to 3)
+            team_id: The ID of the team to assign to
         """
         url = f"{self.conversations_url}/{conversation_id}/assignments"
         data = {"team_id": team_id}
@@ -200,4 +172,61 @@ class ChatwootHandler:
                 return response.json()
         except Exception as e:
             logger.error(f"Failed to assign conversation {conversation_id} to team {team_id}: {e}")
+            raise
+
+    async def create_custom_attribute_definition(
+        self,
+        display_name: str,
+        attribute_key: str,
+        attribute_values: List[str],
+        description: str = "",
+        attribute_model: int = 0,
+    ) -> Dict[str, Any]:
+        """Create a new custom attribute definition for conversations or contacts.
+
+        Args:
+            display_name: The display name for the attribute
+            attribute_key: Unique key for the attribute
+            attribute_values: List of possible values for the list-type attribute
+            description: Optional description of the attribute
+            attribute_model: 0 for conversation attribute, 1 for contact attribute
+        """
+        url = f"{self.account_url}/custom_attribute_definitions"
+        data = {
+            "attribute_display_name": display_name,
+            "attribute_display_type": 6,  # 6 represents list type
+            "attribute_description": description,
+            "attribute_key": attribute_key,
+            "attribute_values": attribute_values,
+            "attribute_model": attribute_model,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=data, headers=self.headers)
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"Failed to create custom attribute definition: {e}")
+            raise
+
+    async def toggle_status(self, conversation_id: int, status: str) -> Dict[str, Any]:
+        """Toggle conversation status
+        Valid statuses: 'open', 'resolved', 'pending', 'snoozed'
+        """
+        url = f"{self.conversations_url}/{conversation_id}/toggle_status"
+        data = {"status": status}
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=data, headers=self.headers)
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Status update failed for conversation {conversation_id}:\n"
+                f"URL: {url}\nStatus: {e.response.status_code}\n"
+                f"Response: {e.response.text}\nPayload: {data}",
+                exc_info=True,
+            )
             raise
