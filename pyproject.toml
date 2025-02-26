@@ -1,0 +1,43 @@
+[project]
+name = "chatwoot-handler"
+version = "0.1.0"
+description = "A Python handler for Chatwoot API"
+requires-python = ">=3.8"
+dependencies = [
+    "httpx",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "pre-commit",
+    "jupyter",
+]
+
+[tool.setuptools]
+packages = ["app", "alembic"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 120
+target-version = "py38"
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+]
+ignore = ["B008"]  # fastapi dependency injection needs this
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

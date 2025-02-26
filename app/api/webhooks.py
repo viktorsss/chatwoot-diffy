@@ -1,14 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, Body
-import httpx
-from sqlmodel import Session, select
-from ..models.database import Dialogue, DialogueCreate, ChatwootWebhook, DifyResponse
-from ..database import get_db
-from .. import tasks
-from typing import Dict, Any, List
-from datetime import datetime
-from .chatwoot import ChatwootHandler
 import logging
-from .. import config
+from datetime import datetime
+from typing import Any, Dict, List
+
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Request
+from sqlmodel import Session, select
+
+from .. import tasks
+from ..database import get_db
+from ..models.database import ChatwootWebhook, Dialogue, DialogueCreate, DifyResponse
+from ..models.non_database import ConversationPriority
+from .chatwoot import ChatwootHandler
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +22,7 @@ async def get_or_create_dialogue(db: Session, data: DialogueCreate) -> Dialogue:
     Get existing dialogue or create a new one.
     Updates the dialogue if it exists with new data.
     """
-    statement = select(Dialogue).where(
-        Dialogue.chatwoot_conversation_id == data.chatwoot_conversation_id
-    )
+    statement = select(Dialogue).where(Dialogue.chatwoot_conversation_id == data.chatwoot_conversation_id)
     dialogue = db.exec(statement).first()
 
     if dialogue:
@@ -62,15 +61,11 @@ async def send_chatwoot_message(
         return {"status": "success", "message": "Message sent successfully"}
     except Exception as e:
         logger.error(f"Failed to send message to Chatwoot: {e}")
-        raise HTTPException(
-            status_code=500, detail="Failed to send message to Chatwoot"
-        )
+        raise HTTPException(status_code=500, detail="Failed to send message to Chatwoot") from e
 
 
 @router.post("/chatwoot-webhook")
-async def chatwoot_webhook(
-    request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
-):
+async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     print("Received Chatwoot webhook request")
     payload = await request.json()
     webhook_data = ChatwootWebhook.model_validate(payload)
@@ -102,10 +97,7 @@ async def chatwoot_webhook(
                 dify_response_data = DifyResponse(**task_result)
                 print(f"Dify response data: {dify_response_data}")
 
-                if (
-                    dify_response_data.conversation_id
-                    and not dialogue.dify_conversation_id
-                ):
+                if dify_response_data.conversation_id and not dialogue.dify_conversation_id:
                     dialogue.dify_conversation_id = dify_response_data.conversation_id
                     db.commit()
 
@@ -145,15 +137,11 @@ async def chatwoot_webhook(
             return {"status": "skipped", "reason": "no conversation data"}
 
         conversation_id = str(webhook_data.conversation.id)
-        statement = select(Dialogue).where(
-            Dialogue.chatwoot_conversation_id == conversation_id
-        )
+        statement = select(Dialogue).where(Dialogue.chatwoot_conversation_id == conversation_id)
         dialogue = db.exec(statement).first()
 
         if dialogue and dialogue.dify_conversation_id:
-            background_tasks.add_task(
-                tasks.delete_dify_conversation, dialogue.dify_conversation_id
-            )
+            background_tasks.add_task(tasks.delete_dify_conversation, dialogue.dify_conversation_id)
             db.delete(dialogue)
             db.commit()
 
@@ -161,9 +149,7 @@ async def chatwoot_webhook(
 
 
 @router.post("/update-labels/{conversation_id}")
-async def update_labels(
-    conversation_id: int, labels: List[str], db: Session = Depends(get_db)
-):
+async def update_labels(conversation_id: int, labels: List[str], db: Session = Depends(get_db)):
     """
     Update labels for a Chatwoot conversation
 
@@ -172,9 +158,7 @@ async def update_labels(
     - labels: List of label strings to apply to the conversation (request body)
     """
     try:
-        result = await chatwoot.add_labels(
-            conversation_id=conversation_id, labels=labels
-        )
+        result = await chatwoot.add_labels(conversation_id=conversation_id, labels=labels)
         return {
             "status": "success",
             "conversation_id": conversation_id,
@@ -182,9 +166,7 @@ async def update_labels(
         }
     except Exception as e:
         logger.error(f"Failed to update labels for conversation {conversation_id}: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to update labels: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to update labels: {str(e)}") from e
 
 
 @router.post("/update_custom_attributes/{conversation_id}")
@@ -213,21 +195,17 @@ async def update_custom_attributes(
             "custom_attributes": result,
         }
     except Exception as e:
-        logger.error(
-            f"Failed to update custom attributes for conversation {conversation_id}: {e}"
-        )
-        raise HTTPException(
-            status_code=500, detail=f"Failed to update custom attributes: {str(e)}"
-        )
+        logger.error(f"Failed to update custom attributes for conversation {conversation_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update custom attributes: {str(e)}") from e
 
 
 @router.post("/toggle-priority/{conversation_id}")
 async def toggle_conversation_priority(
     conversation_id: int,
-    priority: str = Body(
+    priority: ConversationPriority = Body(
         ...,
         embed=True,
-        description="Priority level: 'urgent', 'high', 'medium', 'low', or None",
+        description="Priority level: 'urgent', 'high', 'medium', 'low', or null",
     ),
     db: Session = Depends(get_db),
 ):
@@ -244,18 +222,14 @@ async def toggle_conversation_priority(
         }
     """
     try:
-        result = await chatwoot.toggle_priority(
-            conversation_id=conversation_id, priority=priority
-        )
+        # Convert enum to string value or None
+        priority_value = priority.value
+        result = await chatwoot.toggle_priority(conversation_id=conversation_id, priority=str(priority_value))
         return {
             "status": "success",
             "conversation_id": conversation_id,
             "priority": result,
         }
     except Exception as e:
-        logger.error(
-            f"Failed to toggle priority for conversation {conversation_id}: {e}"
-        )
-        raise HTTPException(
-            status_code=500, detail=f"Failed to toggle priority: {str(e)}"
-        )
+        logger.error(f"Failed to toggle priority for conversation {conversation_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to toggle priority: {str(e)}") from e

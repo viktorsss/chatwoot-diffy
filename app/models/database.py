@@ -1,6 +1,8 @@
-from sqlmodel import SQLModel, Field
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from sqlmodel import Field, SQLModel
+
 
 class Dialogue(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -11,6 +13,7 @@ class Dialogue(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
+
 # This can be used for both validation and creation
 class DialogueCreate(SQLModel):
     chatwoot_conversation_id: str
@@ -18,17 +21,20 @@ class DialogueCreate(SQLModel):
     assignee_id: Optional[int] = None
     dify_conversation_id: Optional[str] = None
 
+
 # Chatwoot webhook models
 class ChatwootSender(SQLModel):
     id: Optional[int] = None
     type: Optional[str] = None  # "user", "agent_bot", etc.
 
+
 class ChatwootMeta(SQLModel):
     assignee: Optional[dict] = None
-    
+
     @property
     def assignee_id(self) -> Optional[int]:
         return self.assignee.get("id") if self.assignee else None
+
 
 class ChatwootConversation(SQLModel):
     id: int
@@ -40,12 +46,14 @@ class ChatwootConversation(SQLModel):
     def assignee_id(self) -> Optional[int]:
         return self.meta.assignee_id
 
+
 class ChatwootMessage(SQLModel):
     id: int
     content: str
     message_type: str  # This will be "incoming" or "outgoing"
     conversation: ChatwootConversation
     sender: ChatwootSender
+
 
 class ChatwootWebhook(SQLModel):
     event: str
@@ -96,12 +104,11 @@ class ChatwootWebhook(SQLModel):
         """Get sender type"""
         return self.sender.type if self.sender else None
 
-    def to_dialogue_create(self) -> DialogueCreate:        
+    def to_dialogue_create(self) -> DialogueCreate:
         return DialogueCreate(
-            chatwoot_conversation_id=str(self.conversation_id),
-            status=self.status,
-            assignee_id=self.assignee_id
-        ) 
+            chatwoot_conversation_id=str(self.conversation_id), status=self.status, assignee_id=self.assignee_id
+        )
+
 
 class DifyResponse(SQLModel):
     event: Optional[str] = None
@@ -115,8 +122,11 @@ class DifyResponse(SQLModel):
     created_at: Optional[int] = None
 
     @classmethod
-    def error_response(cls) -> 'DifyResponse':
+    def error_response(cls) -> "DifyResponse":
         """Create an error response object"""
         return cls(
-            answer="I apologize, but I'm temporarily unavailable. Please try again later or wait for a human operator to respond."
-        ) 
+            answer=(
+                "I apologize, but I'm temporarily unavailable. "
+                "Please try again later or wait for a human operator to respond."
+            )
+        )
