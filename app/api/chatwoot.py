@@ -111,7 +111,7 @@ class ChatwootHandler:
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"Failed to assign conversation {conversation_id} " f"to agent {assignee_id}: {e}")
+            logger.error(f"Failed to assign conversation {conversation_id} to agent {assignee_id}: {e}")
             raise
 
     async def update_custom_attributes(self, conversation_id: int, custom_attributes: Dict[str, Any]) -> Dict[str, Any]:
@@ -151,3 +151,20 @@ class ChatwootHandler:
         except Exception as e:
             logger.error(f"Failed to toggle priority for conversation {conversation_id}: {e}")
             raise
+
+    def send_message_sync(self, conversation_id: int, message: str, private: bool = False):
+        """Synchronous version of send_message for use in Celery tasks"""
+        import httpx
+
+        url = f"{self.conversations_url}/{conversation_id}/messages"
+
+        data = {
+            "content": message,
+            "message_type": "outgoing",
+            "private": private,
+        }
+
+        with httpx.Client() as client:
+            response = client.post(url, json=data, headers=self.headers, timeout=30.0)
+            response.raise_for_status()
+            return response.json()

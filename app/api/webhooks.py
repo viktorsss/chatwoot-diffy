@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from .. import tasks
 from ..database import get_db
-from ..models.database import ChatwootWebhook, Dialogue, DialogueCreate, DifyResponse
+from ..models.database import ChatwootWebhook, Dialogue, DialogueCreate
 from ..models.non_database import ConversationPriority
 from .chatwoot import ChatwootHandler
 
@@ -86,27 +86,24 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
                 dialogue_data = webhook_data.to_dialogue_create()
                 dialogue = await get_or_create_dialogue(db, dialogue_data)
 
-                # Get response from Dify via Celery task
-                task = tasks.process_message_with_dify.delay(
-                    message=webhook_data.content,
-                    dify_conversation_id=dialogue.dify_conversation_id,
+                # Just start the task and return immediately
+                tasks.process_message_with_dify.apply_async(
+                    args=[
+                        webhook_data.content,
+                        dialogue.dify_conversation_id,
+                        dialogue.chatwoot_conversation_id,
+                    ],
+                    link=tasks.handle_dify_response.s(
+                        conversation_id=webhook_data.conversation_id,
+                        dialogue_id=dialogue.id,
+                    ),
+                    link_error=tasks.handle_dify_error.s(
+                        conversation_id=webhook_data.conversation_id,
+                    ),
                 )
-                task_result = task.get()  # This blocks until the task is complete
 
-                # Convert dict to DifyResponse object
-                dify_response_data = DifyResponse(**task_result)
-                print(f"Dify response data: {dify_response_data}")
+                return {"status": "processing"}
 
-                if dify_response_data.conversation_id and not dialogue.dify_conversation_id:
-                    dialogue.dify_conversation_id = dify_response_data.conversation_id
-                    db.commit()
-
-                await send_chatwoot_message(
-                    conversation_id=webhook_data.conversation_id,
-                    message=dify_response_data.answer,
-                    is_private=False,
-                    db=db,
-                )
             except Exception as e:
                 logger.error(f"Failed to process message with Dify: {e}")
                 await send_chatwoot_message(
@@ -233,3 +230,21 @@ async def toggle_conversation_priority(
     except Exception as e:
         logger.error(f"Failed to toggle priority for conversation {conversation_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to toggle priority: {str(e)}") from e
+
+
+@router.get("/conversations/dify/{dify_conversation_id}")
+async def get_chatwoot_conversation_id(dify_conversation_id: str, db: Session = Depends(get_db)):
+    """
+    Get Chatwoot conversation ID from Dify conversation ID
+    """
+    statement = select(Dialogue).where(Dialogue.dify_conversation_id == dify_conversation_id)
+    dialogue = db.exec(statement).first()
+
+    if not dialogue:
+        raise HTTPException(status_code=404, detail=f"No conversation found with Dify ID: {dify_conversation_id}")
+
+    return {
+        "chatwoot_conversation_id": dialogue.chatwoot_conversation_id,
+        "status": dialogue.status,
+        "assignee_id": dialogue.assignee_id,
+    }
