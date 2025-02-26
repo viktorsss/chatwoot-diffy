@@ -33,3 +33,28 @@ build/
 # Windows
 Thumbs.db
 ehthumbs.db
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+*.rdb
+
+# Telemetry
+trace.log
+jaeger-trace.log
+
+# Alembic
+alembic/versions/*.py
+!alembic/versions/.gitkeep
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Additional Python
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
