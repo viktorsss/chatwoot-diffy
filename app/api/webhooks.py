@@ -166,7 +166,7 @@ async def update_labels(conversation_id: int, labels: List[str], db: Session = D
         raise HTTPException(status_code=500, detail=f"Failed to update labels: {str(e)}") from e
 
 
-@router.post("/update_custom_attributes/{conversation_id}")
+@router.post("/update-custom-attributes/{conversation_id}")
 async def update_custom_attributes(
     conversation_id: int,
     custom_attributes: Dict[str, Any],
@@ -192,8 +192,17 @@ async def update_custom_attributes(
             "custom_attributes": result,
         }
     except Exception as e:
-        logger.error(f"Failed to update custom attributes for conversation {conversation_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update custom attributes: {str(e)}") from e
+        # Log the full exception details including traceback
+        logger.exception(f"Failed to update custom attributes for conversation {conversation_id}:")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": str(e),
+                "conversation_id": conversation_id,
+                "attempted_attributes": custom_attributes,
+                "traceback": f"{type(e).__name__}: {str(e)}",
+            },
+        ) from e
 
 
 @router.post("/toggle-priority/{conversation_id}")
@@ -219,8 +228,8 @@ async def toggle_conversation_priority(
         }
     """
     try:
-        # Convert enum to string value or None
         priority_value = priority.value
+        logger.info(f"Attempting to set priority {priority_value} for conversation {conversation_id}")
         result = await chatwoot.toggle_priority(conversation_id=conversation_id, priority=str(priority_value))
         return {
             "status": "success",
@@ -228,8 +237,12 @@ async def toggle_conversation_priority(
             "priority": result,
         }
     except Exception as e:
-        logger.error(f"Failed to toggle priority for conversation {conversation_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to toggle priority: {str(e)}") from e
+        # Log the full exception details
+        logger.exception(f"Detailed error when toggling priority for conversation {conversation_id}:")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": str(e), "conversation_id": conversation_id, "attempted_priority": str(priority_value)},
+        ) from e
 
 
 @router.get("/conversations/dify/{dify_conversation_id}")
@@ -248,3 +261,57 @@ async def get_chatwoot_conversation_id(dify_conversation_id: str, db: Session = 
         "status": dialogue.status,
         "assignee_id": dialogue.assignee_id,
     }
+
+
+@router.post("/assign-team/{conversation_id}")
+async def assign_conversation_to_team(
+    conversation_id: int,
+    team: str = Body(
+        ...,
+        embed=True,
+        description="Team name to assign the conversation to",
+    ),
+    db: Session = Depends(get_db),
+):
+    """
+    Assign a Chatwoot conversation to a team
+
+    Parameters:
+    - conversation_id: The ID of the conversation to update (path parameter)
+    - team: Team name to assign (request body)
+
+    Example request body:
+        {
+            "team": "Support"
+        }
+    """
+    try:
+        # Log the attempt
+        logger.info(f"Attempting to assign conversation {conversation_id} to team {team}")
+
+        # For now, hardcode team_id to 3. In future, resolve team name to ID
+        team_id = 3
+        result = await chatwoot.assign_team(conversation_id=conversation_id, team_id=team_id)
+
+        # Log successful result
+        logger.info(f"Successfully assigned conversation {conversation_id} to team {team}")
+
+        return {
+            "status": "success",
+            "conversation_id": conversation_id,
+            "team": team,
+            "team_id": team_id,
+            "result": result,
+        }
+    except Exception as e:
+        # Log the full exception details
+        logger.exception(f"Detailed error when assigning team for conversation {conversation_id}:")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": str(e),
+                "conversation_id": conversation_id,
+                "attempted_team": team,
+                "attempted_team_id": team_id,
+            },
+        ) from e

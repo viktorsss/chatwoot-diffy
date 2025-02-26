@@ -69,8 +69,13 @@ class ChatwootHandler:
                 response = await client.patch(url, json=data, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
-        except Exception as e:
-            logger.error(f"Failed to update conversation {conversation_id} status: {e}")
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Status update failed for conversation {conversation_id}:\n"
+                f"URL: {url}\nStatus: {e.response.status_code}\n"
+                f"Response: {e.response.text}\nPayload: {data}",
+                exc_info=True,
+            )
             raise
 
     async def add_labels(self, conversation_id: int, labels: List[str]) -> Dict[str, Any]:
@@ -94,10 +99,14 @@ class ChatwootHandler:
             async with httpx.AsyncClient() as client:
                 response = await client.get(url, headers=self.headers)
                 response.raise_for_status()
-                data = response.json()
-                return data
-        except Exception as e:
-            logger.error(f"Failed to get metadata for conversation {conversation_id}: {e}")
+                return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Get conversation failed for {conversation_id}:\n"
+                f"URL: {url}\nStatus: {e.response.status_code}\n"
+                f"Response: {e.response.text}",
+                exc_info=True,
+            )
             raise
 
     async def assign_conversation(self, conversation_id: int, assignee_id: int) -> Dict[str, Any]:
@@ -148,8 +157,13 @@ class ChatwootHandler:
                 response = await client.patch(url, json=data, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
-        except Exception as e:
-            logger.error(f"Failed to toggle priority for conversation {conversation_id}: {e}")
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Priority update failed for conversation {conversation_id}:\n"
+                f"URL: {url}\nStatus: {e.response.status_code}\n"
+                f"Response: {e.response.text}\nPriority: {priority}",
+                exc_info=True,
+            )
             raise
 
     def send_message_sync(self, conversation_id: int, message: str, private: bool = False):
@@ -168,3 +182,22 @@ class ChatwootHandler:
             response = client.post(url, json=data, headers=self.headers, timeout=30.0)
             response.raise_for_status()
             return response.json()
+
+    async def assign_team(self, conversation_id: int, team_id: int = 3) -> Dict[str, Any]:
+        """Assign a conversation to a team.
+
+        Args:
+            conversation_id: The ID of the conversation to assign
+            team_id: The ID of the team to assign to (defaults to 3)
+        """
+        url = f"{self.conversations_url}/{conversation_id}/assignments"
+        data = {"team_id": team_id}
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=data, headers=self.headers)
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"Failed to assign conversation {conversation_id} to team {team_id}: {e}")
+            raise
