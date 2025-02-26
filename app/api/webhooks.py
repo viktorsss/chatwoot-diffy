@@ -162,30 +162,102 @@ async def chatwoot_webhook(
 
 @router.post("/update-labels/{conversation_id}")
 async def update_labels(
-    conversation_id: int,
-    labels: List[str],
-    db: Session = Depends(get_db)
+    conversation_id: int, labels: List[str], db: Session = Depends(get_db)
 ):
     """
     Update labels for a Chatwoot conversation
-    
+
     Parameters:
     - conversation_id: The ID of the conversation to update (path parameter)
     - labels: List of label strings to apply to the conversation (request body)
     """
     try:
         result = await chatwoot.add_labels(
-            conversation_id=conversation_id,
-            labels=labels
+            conversation_id=conversation_id, labels=labels
         )
         return {
             "status": "success",
             "conversation_id": conversation_id,
-            "labels": result
+            "labels": result,
         }
     except Exception as e:
         logger.error(f"Failed to update labels for conversation {conversation_id}: {e}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to update labels: {str(e)}"
+            status_code=500, detail=f"Failed to update labels: {str(e)}"
+        )
+
+
+@router.post("/update_custom_attributes")
+async def update_custom_attributes(
+    conversation_id: int,
+    custom_attributes: Dict[str, Any],
+    db: Session = Depends(get_db),
+):
+    """
+    Update custom attributes for a Chatwoot conversation
+
+    Parameters:
+    - conversation_id: The ID of the conversation to update (path parameter)
+    - custom_attributes: Dictionary of custom attributes to set (request body)
+
+    Example request body:
+        {
+            "team": "mobilization"
+        }
+    """
+    try:
+        result = await chatwoot.update_custom_attributes(
+            conversation_id=conversation_id, custom_attributes=custom_attributes
+        )
+        return {
+            "status": "success",
+            "conversation_id": conversation_id,
+            "custom_attributes": result,
+        }
+    except Exception as e:
+        logger.error(
+            f"Failed to update custom attributes for conversation {conversation_id}: {e}"
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Failed to update custom attributes: {str(e)}"
+        )
+
+
+@router.post("/toggle-priority/{conversation_id}")
+async def toggle_conversation_priority(
+    conversation_id: int,
+    priority: str = Body(
+        ...,
+        embed=True,
+        description="Priority level: 'urgent', 'high', 'medium', 'low', or None",
+    ),
+    db: Session = Depends(get_db),
+):
+    """
+    Toggle the priority of a Chatwoot conversation
+
+    Parameters:
+    - conversation_id: The ID of the conversation to update (path parameter)
+    - priority: Priority level to set (request body)
+
+    Example request body:
+        {
+            "priority": "high"
+        }
+    """
+    try:
+        result = await chatwoot.toggle_priority(
+            conversation_id=conversation_id, priority=priority
+        )
+        return {
+            "status": "success",
+            "conversation_id": conversation_id,
+            "priority": result,
+        }
+    except Exception as e:
+        logger.error(
+            f"Failed to toggle priority for conversation {conversation_id}: {e}"
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Failed to toggle priority: {str(e)}"
         )

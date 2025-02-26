@@ -143,3 +143,44 @@ class ChatwootHandler:
         except Exception as e:
             logger.error(f"Failed to get conversation {conversation_id}: {e}")
             raise
+
+    async def update_custom_attributes(
+        self,
+        conversation_id: int,
+        custom_attributes: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Update custom attributes for a conversation"""
+        url = f"{self.api_url}/accounts/{self.account_id}/conversations/{conversation_id}/custom_attributes"
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url,
+                    json=custom_attributes,
+                    headers=self.headers
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"Failed to update custom attributes for conversation {conversation_id}: {e}")
+            raise
+
+    async def toggle_priority(
+        self,
+        conversation_id: int,
+        priority: str
+    ) -> Dict[str, Any]:
+        """Toggle the priority of a conversation
+        Valid priorities: 'urgent', 'high', 'medium', 'low', None
+        """
+        url = f"{self.api_url}/accounts/{self.account_id}/conversations/{conversation_id}"
+        data = {"priority": priority}
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.patch(url, json=data, headers=self.headers)
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"Failed to toggle priority for conversation {conversation_id}: {e}")
+            raise
