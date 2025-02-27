@@ -138,3 +138,22 @@ def handle_dify_error(request: Dict[str, Any], exc: Exception, traceback: str, c
         message="Sorry, I'm having trouble processing your message right now.",
         private=False,
     )
+
+
+@celery.task(name="app.tasks.delete_dify_conversation")
+def delete_dify_conversation(dify_conversation_id: str):
+    """Delete a conversation from Dify when it's deleted in Chatwoot"""
+    logger.info(f"Deleting Dify conversation: {dify_conversation_id}")
+
+    url = f"{config.DIFY_API_URL}/conversations/{dify_conversation_id}"
+    headers = {"Authorization": f"Bearer {config.DIFY_API_KEY}", "Content-Type": "application/json"}
+
+    try:
+        with httpx.Client(timeout=HTTPX_TIMEOUT) as client:
+            response = client.delete(url, headers=headers)
+            response.raise_for_status()
+            logger.info(f"Successfully deleted Dify conversation: {dify_conversation_id}")
+            return {"status": "success", "conversation_id": dify_conversation_id}
+    except Exception as e:
+        logger.error(f"Failed to delete Dify conversation {dify_conversation_id}: {e}", exc_info=True)
+        return {"status": "error", "conversation_id": dify_conversation_id, "error": str(e)}
