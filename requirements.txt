@@ -12,6 +12,8 @@ anyio==4.8.0
     #   starlette
 asgiref==3.8.1
     # via opentelemetry-instrumentation-asgi
+async-timeout==5.0.1
+    # via redis
 billiard==4.2.1
     # via celery
 celery==5.4.0
@@ -42,6 +44,8 @@ deprecated==1.2.18
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-semantic-conventions
+exceptiongroup==1.2.2
+    # via anyio
 fastapi==0.115.8
     # via chatwoot-handler (pyproject.toml)
 googleapis-common-protos==1.68.0
@@ -181,11 +185,13 @@ typing-extensions==4.12.2
     # via
     #   alembic
     #   anyio
+    #   asgiref
     #   fastapi
     #   opentelemetry-sdk
     #   pydantic
     #   pydantic-core
     #   sqlalchemy
+    #   uvicorn
 tzdata==2025.1
     # via
     #   celery

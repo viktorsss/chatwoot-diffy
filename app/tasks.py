@@ -87,12 +87,7 @@ def process_message_with_dify(
         logger.error(f"Error processing message with Dify: {e}", exc_info=True)
         logger.warning(f"Warning - Dify conversation ID: {dify_conversation_id}")
         logger.warning(f"Info - Chatwoot conversation ID: {chatwoot_conversation_id}")
-        return {
-            "answer": (
-                "I apologize, but I'm temporarily unavailable. "
-                "Please try again later or wait for a human operator to respond."
-            )
-        }
+        raise e from e
 
 
 @celery.task(name="app.tasks.handle_dify_response")
@@ -156,4 +151,4 @@ def delete_dify_conversation(dify_conversation_id: str):
             return {"status": "success", "conversation_id": dify_conversation_id}
     except Exception as e:
         logger.error(f"Failed to delete Dify conversation {dify_conversation_id}: {e}", exc_info=True)
-        return {"status": "error", "conversation_id": dify_conversation_id, "error": str(e)}
+        raise e from e

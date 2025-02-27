@@ -1,8 +1,10 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, FastAPI, HTTPException, Request
 from sqlmodel import Session, select
 
 from .. import tasks
@@ -16,6 +18,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 chatwoot = ChatwootHandler()
 
+# Team management
+team_cache: Dict[str, int] = {}
+team_cache_lock = asyncio.Lock()
+last_update_time = 0
+
 
 async def get_or_create_dialogue(db: Session, data: DialogueCreate) -> Dialogue:
     """
@@ -27,12 +34,12 @@ async def get_or_create_dialogue(db: Session, data: DialogueCreate) -> Dialogue:
 
     if dialogue:
         # Update existing dialogue with new data
-        for field, value in data.dict(exclude_unset=True).items():
+        for field, value in data.model_dump(exclude_unset=True).items():
             setattr(dialogue, field, value)
         dialogue.updated_at = datetime.utcnow()
     else:
         # Create new dialogue
-        dialogue = Dialogue(**data.dict())
+        dialogue = Dialogue(**data.model_dump())
         db.add(dialogue)
 
     db.commit()
@@ -75,10 +82,11 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
 
     if webhook_data.event == "message_created":
         print(f"Webhook data: {webhook_data}")
-        if webhook_data.sender_type == "agent_bot":
+        if webhook_data.sender_type in ["agent_bot", "????"]:
             logger.info(f"Skipping agent_bot message: {webhook_data.content}")
             return {"status": "skipped", "reason": "agent_bot message"}
         if webhook_data.message_type == "incoming" and webhook_data.status == "pending":
+            print(f"Processing message: {webhook_data}")
             try:
                 dialogue_data = webhook_data.to_dialogue_create()
                 dialogue = await get_or_create_dialogue(db, dialogue_data)
@@ -260,6 +268,53 @@ async def get_chatwoot_conversation_id(dify_conversation_id: str, db: Session = 
     }
 
 
+async def update_team_cache():
+    """Update the team name to ID mapping cache."""
+    global team_cache, last_update_time
+
+    async with team_cache_lock:
+        try:
+            teams = await chatwoot.get_teams()
+
+            # Create case-insensitive mappings from name to ID
+            new_cache = {team["name"].lower(): team["id"] for team in teams}
+
+            # Update the cache
+            team_cache = new_cache
+            last_update_time = datetime.utcnow().timestamp()
+
+            logger.info(f"Updated team cache with {len(team_cache)} teams")
+            return team_cache
+        except Exception as e:
+            logger.error(f"Failed to update team cache: {e}", exc_info=True)
+            raise
+
+
+async def get_team_id(team_name: str) -> Optional[int]:
+    """Get team ID from name, updating cache if necessary.
+
+    Args:
+        team_name: The name of the team to look up
+
+    Returns:
+        The team ID or None if not found
+    """
+    if not team_cache or (datetime.utcnow().timestamp() - last_update_time) > 24 * 3600:  # Cache for 24 hour
+        await update_team_cache()
+
+    return team_cache.get(team_name.lower())
+
+
+@router.post("/refresh-teams")
+async def refresh_teams_cache():
+    """Manually refresh the team cache."""
+    try:
+        teams = await update_team_cache()
+        return {"status": "success", "teams": len(teams)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to refresh teams: {str(e)}") from e
+
+
 @router.post("/assign-team/{conversation_id}")
 async def assign_conversation_to_team(
     conversation_id: int,
@@ -286,11 +341,24 @@ async def assign_conversation_to_team(
         # Log the attempt
         logger.info(f"Attempting to assign conversation {conversation_id} to team {team}")
 
-        team_id = 0  # TODO: Remove hardcode
+        # Get team_id from name
+        team_id = await get_team_id(team)
+
+        if team_id is None:
+            # Try to refresh the cache and try again
+            await update_team_cache()
+            team_id = await get_team_id(team)
+
+            if team_id is None:
+                raise HTTPException(
+                    status_code=404, detail=f"Team '{team}' not found. Available teams: {list(team_cache.keys())}"
+                )
+
+        # Assign the conversation to the team
         result = await chatwoot.assign_team(conversation_id=conversation_id, team_id=team_id)
 
         # Log successful result
-        logger.info(f"Successfully assigned conversation {conversation_id} to team {team}")
+        logger.info(f"Successfully assigned conversation {conversation_id} to team {team} (ID: {team_id})")
 
         return {
             "status": "success",
@@ -299,6 +367,8 @@ async def assign_conversation_to_team(
             "team_id": team_id,
             "result": result,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         # Log the full exception details
         logger.exception(f"Detailed error when assigning team for conversation {conversation_id}:")
@@ -308,7 +378,7 @@ async def assign_conversation_to_team(
                 "error": str(e),
                 "conversation_id": conversation_id,
                 "attempted_team": team,
-                "attempted_team_id": team_id,
+                "available_teams": list(team_cache.keys()),
             },
         ) from e
 
@@ -344,3 +414,17 @@ async def toggle_conversation_status(
             status_code=500,
             detail={"error": str(e), "conversation_id": conversation_id},
         ) from e
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan events manager"""
+    # Startup
+    try:
+        await update_team_cache()
+        logger.info(f"Initialized team cache with {len(team_cache)} teams")
+    except Exception as e:
+        logger.error(f"Failed to initialize team cache: {e}", exc_info=True)
+    yield
+    # Shutdown
+    pass

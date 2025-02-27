@@ -155,14 +155,22 @@ class ChatwootHandler:
             response.raise_for_status()
             return response.json()
 
-    async def assign_team(self, conversation_id: int, team_id: int = 0) -> Dict[str, Any]:
+    async def assign_team(self, conversation_id: int, team_id: int = 0, team_name: str = None) -> Dict[str, Any]:
         """Assign a conversation to a team.
 
         Args:
             conversation_id: The ID of the conversation to assign
             team_id: The ID of the team to assign to
+            team_name: The name of the team to assign to (will be looked up if provided)
         """
         url = f"{self.conversations_url}/{conversation_id}/assignments"
+
+        # Use team name to get team_id if provided
+        if team_name and not team_id:
+            teams = await self.get_teams()
+            team_map = {team["name"].lower(): team["id"] for team in teams}
+            team_id = team_map.get(team_name.lower(), 0)
+
         data = {"team_id": team_id}
 
         try:
@@ -171,7 +179,7 @@ class ChatwootHandler:
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"Failed to assign conversation {conversation_id} to team {team_id}: {e}")
+            logger.error(f"Failed to assign conversation {conversation_id} to team {team_id or team_name}: {e}")
             raise
 
     async def create_custom_attribute_definition(
@@ -229,4 +237,75 @@ class ChatwootHandler:
                 f"Response: {e.response.text}\nPayload: {data}",
                 exc_info=True,
             )
+            raise
+
+    async def get_teams(self) -> List[Dict[str, Any]]:
+        """Fetch all teams from the Chatwoot account.
+
+        Returns:
+            List of team objects with properties like id, name, description, etc.
+        """
+        url = f"{self.account_url}/teams"
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=self.headers)
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to fetch teams:\nURL: {url}\nStatus: {e.response.status_code}\nResponse: {e.response.text}",
+                exc_info=True,
+            )
+            logger.warning("Resroting to using hardcoded teams")
+            return [
+                {
+                    "id": 3,
+                    "name": "срочная служба",
+                    "description": "",
+                    "allow_auto_assign": True,
+                    "private": False,
+                    "account_id": 1,
+                    "is_member": True,
+                },
+                {
+                    "id": 4,
+                    "name": "консультанты",
+                    "description": "",
+                    "allow_auto_assign": True,
+                    "private": True,
+                    "account_id": 1,
+                    "is_member": True,
+                },
+                {
+                    "id": 5,
+                    "name": "мобилизация",
+                    "description": "",
+                    "allow_auto_assign": True,
+                    "private": True,
+                    "account_id": 1,
+                    "is_member": True,
+                },
+            ]
+
+    async def get_conversation_list(self, status: str = "all", assignee_type: str = "all") -> List[Dict[str, Any]]:
+        """Get a list of conversations based on filters.
+
+        Args:
+            status: Filter by conversation status (all, open, resolved, pending)
+            assignee_type: Filter by assignee (all, me, unassigned)
+
+        Returns:
+            List of conversation objects
+        """
+        url = f"{self.conversations_url}?status={status}&assignee_type={assignee_type}"
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=self.headers)
+                response.raise_for_status()
+                data = response.json()
+                return data.get("data", [])
+        except Exception as e:
+            logger.error(f"Failed to get conversation list: {e}")
             raise
