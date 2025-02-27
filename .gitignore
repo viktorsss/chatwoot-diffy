@@ -1,19 +1,20 @@
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.db
-*.sqlite3
-
-# Virtual Environment
+*$py.class
+.Python
+.env
+.venv/
 venv/
 ENV/
-env/
-.venv/
 
-# Environment Variables
-.env
+# Jupyter
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# IDE
+.idea/
+.vscode/
 
 # VS Code
 .vscode/
@@ -26,12 +27,34 @@ env/
 dist/
 build/
 
-# Jupyter Notebook
-.ipynb_checkpoints
-
 # MacOS
 .DS_Store
 
 # Windows
 Thumbs.db
 ehthumbs.db
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+*.rdb
+
+# Telemetry
+trace.log
+jaeger-trace.log
+
+# Alembic
+alembic/versions/*.py
+!alembic/versions/.gitkeep
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Additional Python
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/

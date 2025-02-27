@@ -12,6 +12,9 @@ services:
       - "8000:8000"
     environment:
       - OTEL_SERVICE_NAME=chatwoot-dify-web
+      - DEBUG=False  # Force this to be False
+      - DB_HOST=db   # Force the host
+      - DB_PORT=5432 # Force the port
     depends_on:
       db:
         condition: service_healthy
@@ -24,11 +27,14 @@ services:
 
   celery_worker:
     build: .
-    command: celery -A app.tasks worker --loglevel=info
+    command: celery -A app.tasks worker --loglevel=info --concurrency=4 --pool=prefork
     volumes:
       - .:/app
     environment:
       - OTEL_SERVICE_NAME=chatwoot-dify-worker
+      - DEBUG=False  # Force this to be False
+      - DB_HOST=db   # Force the host
+      - DB_PORT=5432 # Force the port
     depends_on:
       - redis
     env_file:
@@ -69,4 +75,4 @@ services:
       - COLLECTOR_OTLP_ENABLED=true
 
 volumes:
-  postgres_data: 
+  postgres_data:

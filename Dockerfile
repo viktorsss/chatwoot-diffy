@@ -1,4 +1,6 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:0.6.3 /uv /uvx /bin/
+
 
 WORKDIR /app
 
@@ -10,9 +12,10 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN uv pip install --system --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
 COPY . .
@@ -28,4 +31,4 @@ USER appuser
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Command will be specified in docker-compose.yml 
+# Command will be specified in docker-compose.yml
