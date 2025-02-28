@@ -1,8 +1,18 @@
+from sqlalchemy.pool import QueuePool
 from sqlmodel import Session, SQLModel, create_engine
 
 from . import config
 
-engine = create_engine(config.DATABASE_URL)
+engine = create_engine(
+    config.DATABASE_URL,
+    poolclass=QueuePool,
+    pool_size=config.DB_POOL_SIZE,
+    max_overflow=config.DB_MAX_OVERFLOW,
+    pool_timeout=config.DB_POOL_TIMEOUT,
+    pool_recycle=config.DB_POOL_RECYCLE,
+    pool_pre_ping=config.DB_POOL_PRE_PING,
+    connect_args={"connect_timeout": 10},  # PostgreSQL specific - connect timeout in seconds
+)
 
 
 def get_session():

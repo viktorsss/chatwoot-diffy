@@ -95,26 +95,29 @@ def handle_dify_response(dify_result: Dict[str, Any], conversation_id: int, dial
     """Handle the response from Dify"""
 
     chatwoot = ChatwootHandler()
-    db = SessionLocal()
 
-    try:
-        dify_response_data = DifyResponse(**dify_result)
+    # Use context manager to ensure proper session management
+    with SessionLocal() as db:
+        try:
+            dify_response_data = DifyResponse(**dify_result)
 
-        # Update dialogue if needed
-        if dify_response_data.conversation_id:
-            dialogue = db.get(Dialogue, dialogue_id)
-            if dialogue and not dialogue.dify_conversation_id:
-                dialogue.dify_conversation_id = dify_response_data.conversation_id
-                db.commit()
+            # Update dialogue if needed
+            if dify_response_data.conversation_id:
+                dialogue = db.get(Dialogue, dialogue_id)
+                if dialogue and not dialogue.dify_conversation_id:
+                    dialogue.dify_conversation_id = dify_response_data.conversation_id
+                    db.commit()
 
-        # Send message back to Chatwoot. Sync is okay because we use separate instance of ChatwootHandler
-        chatwoot.send_message_sync(
-            conversation_id=conversation_id,
-            message=dify_response_data.answer,
-            private=False,
-        )
-    finally:
-        db.close()
+            # Send message back to Chatwoot. Sync is okay because we use separate instance of ChatwootHandler
+            chatwoot.send_message_sync(
+                conversation_id=conversation_id,
+                message=dify_response_data.answer,
+                private=False,
+            )
+        except Exception as e:
+            logger.error(f"Error handling Dify response: {str(e)}", exc_info=True)
+            # Re-raise to ensure Celery knows this task failed
+            raise
 
 
 @celery.task(name="app.tasks.handle_dify_error")
