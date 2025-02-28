@@ -1,5 +1,4 @@
 import logging
-import os
 from typing import Any, Dict, Optional
 
 import httpx
@@ -13,16 +12,16 @@ from .models.database import Dialogue, DifyResponse
 
 load_dotenv()
 
-# Add timeout constants with more generous values
+# Use timeout constants from config
 HTTPX_TIMEOUT = httpx.Timeout(
-    connect=30.0,  # connection timeout
-    read=120.0,  # read timeout - increased significantly for LLM responses
-    write=30.0,  # write timeout
-    pool=30.0,  # pool timeout
+    connect=config.HTTPX_CONNECT_TIMEOUT,
+    read=config.HTTPX_READ_TIMEOUT,
+    write=config.HTTPX_WRITE_TIMEOUT,
+    pool=config.HTTPX_POOL_TIMEOUT,
 )
 
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-
+# Use LOG_LEVEL from config instead of directly from environment
+LOG_LEVEL = config.LOG_LEVEL
 
 REDIS_BROKER = config.REDIS_BROKER
 REDIS_BACKEND = config.REDIS_BACKEND
@@ -77,8 +76,12 @@ def process_message_with_dify(
     }
 
     try:
-        with httpx.Client(timeout=120.0) as client:
+        with httpx.Client(timeout=HTTPX_TIMEOUT) as client:
             response = client.post(url, json=data, headers=headers)
+            # Store response content before raising exception
+            if response.status_code >= 400:
+                error_content = response.text
+                logger.error(f"Dify API error response: {error_content}")
             response.raise_for_status()
             result = response.json()
             return result
@@ -87,6 +90,9 @@ def process_message_with_dify(
         logger.error(f"Error processing message with Dify: {e}", exc_info=True)
         logger.warning(f"Warning - Dify conversation ID: {dify_conversation_id}")
         logger.warning(f"Info - Chatwoot conversation ID: {chatwoot_conversation_id}")
+        # If it's an HTTP error, try to extract and log the response content
+        if isinstance(e, httpx.HTTPStatusError) and hasattr(e, "response"):
+            logger.error(f"Response content: {e.response.text}")
         raise e from e
 
 
