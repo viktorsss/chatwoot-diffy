@@ -5,7 +5,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, FastAPI, HTTPException, Request
-from sqlmodel import Session, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 from .. import tasks
 from ..database import get_db
@@ -24,13 +25,14 @@ team_cache_lock = asyncio.Lock()
 last_update_time = 0
 
 
-async def get_or_create_dialogue(db: Session, data: DialogueCreate) -> Dialogue:
+async def get_or_create_dialogue(db: AsyncSession, data: DialogueCreate) -> Dialogue:
     """
     Get existing dialogue or create a new one.
     Updates the dialogue if it exists with new data.
     """
     statement = select(Dialogue).where(Dialogue.chatwoot_conversation_id == data.chatwoot_conversation_id)
-    dialogue = db.exec(statement).first()
+    result = await db.execute(statement)
+    dialogue = result.scalar_one_or_none()
 
     if dialogue:
         # Update existing dialogue with new data
@@ -42,8 +44,8 @@ async def get_or_create_dialogue(db: Session, data: DialogueCreate) -> Dialogue:
         dialogue = Dialogue(**data.model_dump())
         db.add(dialogue)
 
-    db.commit()
-    db.refresh(dialogue)
+    await db.commit()
+    await db.refresh(dialogue)
     return dialogue
 
 
@@ -52,7 +54,7 @@ async def send_chatwoot_message(
     conversation_id: int,
     message: str,
     is_private: bool = False,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Send a message to Chatwoot conversation.
@@ -72,7 +74,7 @@ async def send_chatwoot_message(
 
 
 @router.post("/chatwoot-webhook")
-async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     print("Received Chatwoot webhook request")
     payload = await request.json()
     webhook_data = ChatwootWebhook.model_validate(payload)
@@ -140,18 +142,19 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
 
         conversation_id = str(webhook_data.conversation.id)
         statement = select(Dialogue).where(Dialogue.chatwoot_conversation_id == conversation_id)
-        dialogue = db.exec(statement).first()
+        dialogue = await db.execute(statement)
+        dialogue = dialogue.scalar_one_or_none()
 
         if dialogue and dialogue.dify_conversation_id:
             background_tasks.add_task(tasks.delete_dify_conversation, dialogue.dify_conversation_id)
-            db.delete(dialogue)
-            db.commit()
+            await db.delete(dialogue)
+            await db.commit()
 
     return {"status": "success"}
 
 
 @router.post("/update-labels/{conversation_id}")
-async def update_labels(conversation_id: int, labels: List[str], db: Session = Depends(get_db)):
+async def update_labels(conversation_id: int, labels: List[str], db: AsyncSession = Depends(get_db)):
     """
     Update labels for a Chatwoot conversation
 
@@ -175,7 +178,7 @@ async def update_labels(conversation_id: int, labels: List[str], db: Session = D
 async def update_custom_attributes(
     conversation_id: int,
     custom_attributes: Dict[str, Any],
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Update custom attributes for a Chatwoot conversation
@@ -218,7 +221,7 @@ async def toggle_conversation_priority(
         embed=True,
         description="Priority level: 'urgent', 'high', 'medium', 'low', or null",
     ),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Toggle the priority of a Chatwoot conversation
@@ -251,12 +254,13 @@ async def toggle_conversation_priority(
 
 
 @router.get("/conversations/dify/{dify_conversation_id}")
-async def get_chatwoot_conversation_id(dify_conversation_id: str, db: Session = Depends(get_db)):
+async def get_chatwoot_conversation_id(dify_conversation_id: str, db: AsyncSession = Depends(get_db)):
     """
     Get Chatwoot conversation ID from Dify conversation ID
     """
     statement = select(Dialogue).where(Dialogue.dify_conversation_id == dify_conversation_id)
-    dialogue = db.exec(statement).first()
+    dialogue = await db.execute(statement)
+    dialogue = dialogue.scalar_one_or_none()
 
     if not dialogue:
         raise HTTPException(status_code=404, detail=f"No conversation found with Dify ID: {dify_conversation_id}")
@@ -323,7 +327,7 @@ async def assign_conversation_to_team(
         embed=True,
         description="Team name to assign the conversation to",
     ),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Assign a Chatwoot conversation to a team
@@ -387,7 +391,7 @@ async def assign_conversation_to_team(
 async def toggle_conversation_status(
     conversation_id: int,
     status: ConversationStatus = Body(..., embed=True),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Toggle the status of a Chatwoot conversation

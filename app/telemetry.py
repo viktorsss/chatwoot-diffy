@@ -10,6 +10,8 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
+from .database import sync_engine
+
 
 def setup_telemetry(app, engine):
     """Initialize OpenTelemetry instrumentation"""
@@ -33,8 +35,10 @@ def setup_telemetry(app, engine):
     # Instrument FastAPI
     FastAPIInstrumentor.instrument_app(app)
 
-    # Instrument SQLAlchemy
-    SQLAlchemyInstrumentor().instrument(engine=engine, service="chatwoot-dify")
+    # Instrument SQLAlchemy - use sync_engine for instrumentation
+    # For async engines, we need to use the underlying sync_engine
+    # as OpenTelemetry doesn't support async engine instrumentation yet
+    SQLAlchemyInstrumentor().instrument(engine=sync_engine, service="chatwoot-dify")
 
     # Instrument Celery
     CeleryInstrumentor().instrument()
