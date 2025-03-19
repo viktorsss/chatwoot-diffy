@@ -87,6 +87,9 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
         if webhook_data.sender_type in ["agent_bot", "????"]:
             logger.info(f"Skipping agent_bot message: {webhook_data.content}")
             return {"status": "skipped", "reason": "agent_bot message"}
+        # support_messages_user = webhook_data.message_type == "outgoing" and webhook_data.status == "open"
+        # conversation_pending = webhook_data.status == "pending"
+        # user_messages_support_when_open = webhook_data.message_type == "incoming" and webhook_data.status == "open"
         if webhook_data.message_type == "incoming" and webhook_data.status in ["pending", "open"]:
             print(f"Processing message: {webhook_data}")
             try:
@@ -94,11 +97,14 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
                 dialogue = await get_or_create_dialogue(db, dialogue_data)
 
                 # Just start the task and return immediately
+
+                # https://github.com/langgenius/dify/issues/11140 IMPORTANT : `inputs` are cached for conversation
                 tasks.process_message_with_dify.apply_async(
                     args=[
                         webhook_data.content,
                         dialogue.dify_conversation_id,
                         dialogue.chatwoot_conversation_id,
+                        dialogue.status,
                     ],
                     link=tasks.handle_dify_response.s(
                         conversation_id=webhook_data.conversation_id,

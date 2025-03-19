@@ -58,7 +58,10 @@ def make_dify_request(url: str, data: dict, headers: dict) -> dict:
 
 @celery.task
 def process_message_with_dify(
-    message: str, dify_conversation_id: Optional[str] = None, chatwoot_conversation_id: Optional[str] = None
+    message: str,
+    dify_conversation_id: Optional[str] = None,
+    chatwoot_conversation_id: Optional[str] = None,
+    conversation_status: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Process a message with Dify and return the response as a dictionary.
@@ -67,9 +70,10 @@ def process_message_with_dify(
     url = f"{config.DIFY_API_URL}/chat-messages"
     headers = {"Authorization": f"Bearer {config.DIFY_API_KEY}", "Content-Type": "application/json"}
 
+    # https://github.com/langgenius/dify/issues/11140 IMPORTANT : `inputs` are cached for conversation
     data = {
         "query": message,
-        "inputs": {"chatwoot_conversation_id": chatwoot_conversation_id},
+        "inputs": {"chatwoot_conversation_id": chatwoot_conversation_id, "conversation_status": conversation_status},
         "response_mode": config.DIFY_RESPONSE_MODE,
         "conversation_id": dify_conversation_id,
         "user": "user",
