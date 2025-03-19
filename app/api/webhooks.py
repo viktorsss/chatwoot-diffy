@@ -190,6 +190,12 @@ async def update_custom_attributes(
     Example request body:
     {"region": "Moscow", "region_original_string": "Moscow"}
     """
+    if not isinstance(custom_attributes, dict) or not custom_attributes:
+        return {
+            "status": "success",
+            "conversation_id": conversation_id,
+            "custom_attributes": "No custom attrs provided",
+        }
     try:
         result = await chatwoot.patch_custom_attributes(
             conversation_id=conversation_id, custom_attributes=custom_attributes
@@ -220,7 +226,7 @@ async def toggle_conversation_priority(
     priority: ConversationPriority = Body(
         ...,
         embed=True,
-        description="Priority level: 'urgent', 'high', 'medium', 'low', or null",
+        description="Priority level: 'urgent', 'high', 'medium', 'low', or None",
     ),
     db: AsyncSession = Depends(get_db),
 ):
@@ -238,6 +244,8 @@ async def toggle_conversation_priority(
     """
     try:
         priority_value = priority.value
+        if not priority_value or priority_value.lower() == "none":
+            return {"status": "success", "conversation_id": conversation_id, "priority": "None"}
         logger.info(f"Attempting to set priority {priority_value} for conversation {conversation_id}")
         result = await chatwoot.toggle_priority(conversation_id=conversation_id, priority=str(priority_value))
         return {
@@ -342,6 +350,8 @@ async def assign_conversation_to_team(
             "team": "Support"
         }
     """
+    if not team or team.lower() == "none":
+        return {"status": "success", "conversation_id": conversation_id, "team": "None"}
     try:
         # Log the attempt
         logger.info(f"Attempting to assign conversation {conversation_id} to team {team}")
