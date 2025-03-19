@@ -87,7 +87,7 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
         if webhook_data.sender_type in ["agent_bot", "????"]:
             logger.info(f"Skipping agent_bot message: {webhook_data.content}")
             return {"status": "skipped", "reason": "agent_bot message"}
-        if webhook_data.message_type == "incoming" and webhook_data.status == "pending":
+        if webhook_data.message_type == "incoming" and webhook_data.status in ["pending", "open"]:
             print(f"Processing message: {webhook_data}")
             try:
                 dialogue_data = webhook_data.to_dialogue_create()
