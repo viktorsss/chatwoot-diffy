@@ -95,28 +95,6 @@ class ChatwootHandler:
             logger.error(f"Failed to assign conversation {conversation_id} to agent {assignee_id}: {e}")
             raise
 
-    async def update_custom_attributes(self, conversation_id: int, custom_attributes: Dict[str, Any]) -> Dict[str, Any]:
-        """Update custom attributes for a conversation"""
-        custom_attrs_url = f"{self.conversations_url}/{conversation_id}/custom_attributes"
-
-        try:
-            async with httpx.AsyncClient() as client:
-                # First get existing custom attributes from conversation endpoint
-                get_response = await self.get_conversation_data(conversation_id)
-                existing_attributes = get_response.get("custom_attributes", {})
-
-                # Merge existing attributes with new ones
-                merged_attributes = {**existing_attributes, **custom_attributes}
-                payload = {"custom_attributes": merged_attributes}
-
-                # Update with merged attributes
-                response = await client.post(custom_attrs_url, json=payload, headers=self.headers)
-                response.raise_for_status()
-                return response.json()
-        except Exception as e:
-            logger.error(f"Failed to update custom attributes for convo {conversation_id}: {e}")
-            raise
-
     async def patch_custom_attributes(self, conversation_id: int, custom_attributes: Dict[str, Any]) -> Dict[str, Any]:
         """Update custom attributes for a conversation using PATCH method
 
