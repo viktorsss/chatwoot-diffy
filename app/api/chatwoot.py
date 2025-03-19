@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -117,18 +117,51 @@ class ChatwootHandler:
             logger.error(f"Failed to update custom attributes for convo {conversation_id}: {e}")
             raise
 
+    async def patch_custom_attributes(self, conversation_id: int, custom_attributes: Dict[str, Any]) -> Dict[str, Any]:
+        """Update custom attributes for a conversation using PATCH method
+
+        Unlike update_custom_attributes, this method doesn't merge with existing attributes,
+        but directly patches with the provided attributes.
+        """
+        custom_attrs_url = f"{self.conversations_url}/{conversation_id}/custom_attributes"
+
+        try:
+            async with httpx.AsyncClient() as client:
+                payload = {"custom_attributes": custom_attributes}
+
+                # Use PATCH instead of POST to update attributes
+                response = await client.patch(custom_attrs_url, json=payload, headers=self.headers)
+                response.raise_for_status()
+                # Check if response has content before trying to parse as JSON
+                if response.content and len(response.content.strip()) > 0:
+                    try:
+                        return response.json()
+                    except Exception as json_err:
+                        logger.warning(f"Failed to parse JSON response: {json_err}")
+                        return {}
+                return {}
+        except Exception as e:
+            logger.error(f"Failed to patch custom attributes for convo {conversation_id}: {e}")
+            raise
+
     async def toggle_priority(self, conversation_id: int, priority: str) -> Dict[str, Any]:
         """Toggle the priority of a conversation
         Valid priorities: 'urgent', 'high', 'medium', 'low', None
         """
-        url = f"{self.conversations_url}/{conversation_id}"
+        url = f"{self.conversations_url}/{conversation_id}/toggle_priority"
         data = {"priority": priority}
 
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.patch(url, json=data, headers=self.headers)
+                response = await client.post(url, json=data, headers=self.headers)
                 response.raise_for_status()
-                return response.json()
+                if response.content and len(response.content.strip()) > 0:
+                    try:
+                        return response.json()
+                    except Exception as json_err:
+                        logger.warning(f"Failed to parse JSON response: {json_err}")
+                        return {}
+                return {}
         except httpx.HTTPStatusError as e:
             logger.error(
                 f"Priority update failed for conversation {conversation_id}:\n"
@@ -155,7 +188,9 @@ class ChatwootHandler:
             response.raise_for_status()
             return response.json()
 
-    async def assign_team(self, conversation_id: int, team_id: int = 0, team_name: str = None) -> Dict[str, Any]:
+    async def assign_team(
+        self, conversation_id: int, team_id: int = 0, team_name: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Assign a conversation to a team.
 
         Args:

@@ -191,9 +191,10 @@ async def update_custom_attributes(
     {"region": "Moscow", "region_original_string": "Moscow"}
     """
     try:
-        result = await chatwoot.update_custom_attributes(
+        result = await chatwoot.patch_custom_attributes(
             conversation_id=conversation_id, custom_attributes=custom_attributes
         )
+        logger.info(f"Updated custom attributes for conversation {conversation_id}: {result}")
         return {
             "status": "success",
             "conversation_id": conversation_id,
