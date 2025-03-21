@@ -252,6 +252,27 @@ class ChatwootHandler:
             )
             raise
 
+    def toggle_status_sync(self, conversation_id: int, status: str) -> Dict[str, Any]:
+        """Toggle conversation status synchronously
+        Valid statuses: 'open', 'resolved', 'pending', 'snoozed'
+        """
+        url = f"{self.conversations_url}/{conversation_id}/toggle_status"
+        data = {"status": status}
+
+        try:
+            with httpx.Client() as client:
+                response = client.post(url, json=data, headers=self.headers)
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Status update failed for conversation {conversation_id}:\n"
+                f"URL: {url}\nStatus: {e.response.status_code}\n"
+                f"Response: {e.response.text}\nPayload: {data}",
+                exc_info=True,
+            )
+            raise
+
     async def get_teams(self) -> List[Dict[str, Any]]:
         """Fetch all teams from the Chatwoot account.
 

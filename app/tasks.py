@@ -104,6 +104,17 @@ def process_message_with_dify(
         # If it's an HTTP error, try to extract and log the response content
         if isinstance(e, httpx.HTTPStatusError) and hasattr(e, "response"):
             logger.error(f"Response content: {e.response.text}")
+        # Set conversation status to open on error
+        if chatwoot_conversation_id:
+            try:
+                logger.info(f"Setting Chatwoot conversation {chatwoot_conversation_id} status to 'open' due to error")
+                chatwoot = ChatwootHandler()
+                # Use the proper method from ChatwootHandler that already exists
+                result = chatwoot.toggle_status_sync(conversation_id=int(chatwoot_conversation_id), status="open")
+                logger.info(f"Successfully set conversation {chatwoot_conversation_id} status to 'open'")
+            except Exception as status_error:
+                logger.error(f"Failed to set conversation {chatwoot_conversation_id} status to 'open': {status_error}")
+
         raise e from e
 
 
