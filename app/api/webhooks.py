@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from .. import tasks
+from ..config import SKIPPED_MESSAGE
 from ..database import get_db
 from ..models.database import ChatwootWebhook, Dialogue, DialogueCreate
 from ..models.non_database import ConversationPriority, ConversationStatus
@@ -87,10 +88,16 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
         if webhook_data.sender_type in ["agent_bot", "????"]:
             logger.info(f"Skipping agent_bot message: {webhook_data.content}")
             return {"status": "skipped", "reason": "agent_bot message"}
-        # support_messages_user = webhook_data.message_type == "outgoing" and webhook_data.status == "open"
-        # conversation_pending = webhook_data.status == "pending"
-        # user_messages_support_when_open = webhook_data.message_type == "incoming" and webhook_data.status == "open"
-        if webhook_data.message_type == "incoming" and webhook_data.status in ["pending", "open"]:
+        # conversation_is_open = webhook_data.status == "open"
+        # user_messages_when_pending = webhook_data.status == "pending" and webhook_data.message_type == "incoming"
+        # if not webhook_data.message:
+        #     logger.info(f"Skipping message with empty content: {webhook_data}")
+        #     return {"status": "skipped", "reason": "empty message"}
+        if str(webhook_data.content).startswith(SKIPPED_MESSAGE):
+            logger.info(f"Skipping agent_bot message: {webhook_data.content}")
+            return {"status": "skipped", "reason": "agent_bot message"}
+
+        if True:  # we'll see if we need to filter by status later
             print(f"Processing message: {webhook_data}")
             try:
                 dialogue_data = webhook_data.to_dialogue_create()
@@ -105,6 +112,7 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
                         dialogue.dify_conversation_id,
                         dialogue.chatwoot_conversation_id,
                         dialogue.status,
+                        webhook_data.message_type,
                     ],
                     link=tasks.handle_dify_response.s(
                         conversation_id=webhook_data.conversation_id,
@@ -121,7 +129,7 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
                 logger.error(f"Failed to process message with Dify: {e}")
                 await send_chatwoot_message(
                     conversation_id=webhook_data.conversation_id,
-                    message="Sorry, I'm having trouble processing your message right now.",
+                    message=SKIPPED_MESSAGE,
                     is_private=False,
                     db=db,
                 )
