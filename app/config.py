@@ -66,6 +66,15 @@ HTTPX_READ_TIMEOUT = float(os.getenv("HTTPX_READ_TIMEOUT", "120.0"))
 HTTPX_WRITE_TIMEOUT = float(os.getenv("HTTPX_WRITE_TIMEOUT", "30.0"))
 HTTPX_POOL_TIMEOUT = float(os.getenv("HTTPX_POOL_TIMEOUT", "30.0"))
 
+# Sentry configuration
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", "development")
+SENTRY_TRACES_SAMPLE_RATE = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1"))
+SENTRY_PROFILES_SAMPLE_RATE = float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE", "0.1"))
+SENTRY_LOG_LEVEL = os.getenv("SENTRY_LOG_LEVEL", "WARNING")
+SENTRY_ATTACH_STACKTRACE = os.getenv("SENTRY_ATTACH_STACKTRACE", "True").lower() in ("true", "1", "t")
+SENTRY_SEND_DEFAULT_PII = os.getenv("SENTRY_SEND_DEFAULT_PII", "False").lower() in ("true", "1", "t")
+
 # some hardcoded string
 
 SKIPPED_MESSAGE = "Sorry, I'm having trouble processing your message right now."

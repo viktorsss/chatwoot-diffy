@@ -7,9 +7,14 @@ from .api import health, webhooks
 from .api.webhooks import lifespan
 from .database import async_engine, create_db_tables
 from .telemetry import setup_telemetry
+from .utils.sentry import init_sentry
 
 # Add before creating FastAPI app
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+# Initialize Sentry with FastAPI, AsyncPG, and Celery integrations
+if init_sentry(with_fastapi=True, with_asyncpg=True, with_celery=True):
+    logging.info("Sentry initialized for FastAPI application")
 
 app = FastAPI(title="Chatwoot AI Handler", lifespan=lifespan)
 setup_telemetry(app, async_engine)
