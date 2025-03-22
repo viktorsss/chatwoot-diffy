@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from .. import tasks
+from ..config import SKIPPED_MESSAGE
 from ..database import get_db
 from ..models.database import ChatwootWebhook, Dialogue, DialogueCreate
 from ..models.non_database import ConversationPriority, ConversationStatus
@@ -87,18 +88,31 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
         if webhook_data.sender_type in ["agent_bot", "????"]:
             logger.info(f"Skipping agent_bot message: {webhook_data.content}")
             return {"status": "skipped", "reason": "agent_bot message"}
-        if webhook_data.message_type == "incoming" and webhook_data.status == "pending":
+        # conversation_is_open = webhook_data.status == "open"
+        # user_messages_when_pending = webhook_data.status == "pending" and webhook_data.message_type == "incoming"
+        # if not webhook_data.message:
+        #     logger.info(f"Skipping message with empty content: {webhook_data}")
+        #     return {"status": "skipped", "reason": "empty message"}
+        if str(webhook_data.content).startswith(SKIPPED_MESSAGE):
+            logger.info(f"Skipping agent_bot message: {webhook_data.content}")
+            return {"status": "skipped", "reason": "agent_bot message"}
+
+        if True:  # we'll see if we need to filter by status later
             print(f"Processing message: {webhook_data}")
             try:
                 dialogue_data = webhook_data.to_dialogue_create()
                 dialogue = await get_or_create_dialogue(db, dialogue_data)
 
                 # Just start the task and return immediately
+
+                # https://github.com/langgenius/dify/issues/11140 IMPORTANT : `inputs` are cached for conversation
                 tasks.process_message_with_dify.apply_async(
                     args=[
                         webhook_data.content,
                         dialogue.dify_conversation_id,
                         dialogue.chatwoot_conversation_id,
+                        dialogue.status,
+                        webhook_data.message_type,
                     ],
                     link=tasks.handle_dify_response.s(
                         conversation_id=webhook_data.conversation_id,
@@ -115,7 +129,7 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
                 logger.error(f"Failed to process message with Dify: {e}")
                 await send_chatwoot_message(
                     conversation_id=webhook_data.conversation_id,
-                    message="Sorry, I'm having trouble processing your message right now.",
+                    message=SKIPPED_MESSAGE,
                     is_private=False,
                     db=db,
                 )
@@ -190,10 +204,17 @@ async def update_custom_attributes(
     Example request body:
     {"region": "Moscow", "region_original_string": "Moscow"}
     """
+    if not isinstance(custom_attributes, dict) or not custom_attributes:
+        return {
+            "status": "success",
+            "conversation_id": conversation_id,
+            "custom_attributes": "No custom attrs provided",
+        }
     try:
-        result = await chatwoot.update_custom_attributes(
+        result = await chatwoot.patch_custom_attributes(
             conversation_id=conversation_id, custom_attributes=custom_attributes
         )
+        logger.info(f"Updated custom attributes for conversation {conversation_id}: {result}")
         return {
             "status": "success",
             "conversation_id": conversation_id,
@@ -219,7 +240,7 @@ async def toggle_conversation_priority(
     priority: ConversationPriority = Body(
         ...,
         embed=True,
-        description="Priority level: 'urgent', 'high', 'medium', 'low', or null",
+        description="Priority level: 'urgent', 'high', 'medium', 'low', or None",
     ),
     db: AsyncSession = Depends(get_db),
 ):
@@ -237,6 +258,8 @@ async def toggle_conversation_priority(
     """
     try:
         priority_value = priority.value
+        if not priority_value or priority_value.lower() == "none":
+            return {"status": "success", "conversation_id": conversation_id, "priority": "None"}
         logger.info(f"Attempting to set priority {priority_value} for conversation {conversation_id}")
         result = await chatwoot.toggle_priority(conversation_id=conversation_id, priority=str(priority_value))
         return {
@@ -341,6 +364,8 @@ async def assign_conversation_to_team(
             "team": "Support"
         }
     """
+    if not team or team.lower() == "none":
+        return {"status": "success", "conversation_id": conversation_id, "team": "None"}
     try:
         # Log the attempt
         logger.info(f"Attempting to assign conversation {conversation_id} to team {team}")

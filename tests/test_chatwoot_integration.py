@@ -86,7 +86,7 @@ async def test_update_custom_attributes(chatwoot_handler, test_conversation_id):
     test_attribute_value = f"value_{random_string(5)}"
 
     # Update custom attributes
-    result = await chatwoot_handler.update_custom_attributes(
+    result = await chatwoot_handler.patch_custom_attributes(
         conversation_id=test_conversation_id, custom_attributes={test_attribute_key: test_attribute_value}
     )
 

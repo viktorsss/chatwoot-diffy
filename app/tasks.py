@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 from . import config
 from .api.chatwoot import ChatwootHandler
+from .config import SKIPPED_MESSAGE
 from .database import SessionLocal
 from .models.database import Dialogue, DifyResponse
 
@@ -58,18 +59,28 @@ def make_dify_request(url: str, data: dict, headers: dict) -> dict:
 
 @celery.task
 def process_message_with_dify(
-    message: str, dify_conversation_id: Optional[str] = None, chatwoot_conversation_id: Optional[str] = None
+    message: str,
+    dify_conversation_id: Optional[str] = None,
+    chatwoot_conversation_id: Optional[str] = None,
+    conversation_status: Optional[str] = None,
+    message_type: Optional[str] = None,  # `incoming` and `outgoing`
 ) -> Dict[str, Any]:
     """
     Process a message with Dify and return the response as a dictionary.
     """
-
+    if message.startswith(SKIPPED_MESSAGE):
+        return {"status": "skipped", "reason": "agent_bot message"}
     url = f"{config.DIFY_API_URL}/chat-messages"
     headers = {"Authorization": f"Bearer {config.DIFY_API_KEY}", "Content-Type": "application/json"}
 
+    # https://github.com/langgenius/dify/issues/11140 IMPORTANT : `inputs` are cached for conversation
     data = {
         "query": message,
-        "inputs": {"chatwoot_conversation_id": chatwoot_conversation_id},
+        "inputs": {
+            "chatwoot_conversation_id": chatwoot_conversation_id,
+            "conversation_status": conversation_status,
+            "message_direction": message_type,
+        },
         "response_mode": config.DIFY_RESPONSE_MODE,
         "conversation_id": dify_conversation_id,
         "user": "user",
@@ -89,10 +100,21 @@ def process_message_with_dify(
         logger.critical(f"Critical error processing message with Dify: {e}", exc_info=True)
         logger.error(f"Error processing message with Dify: {e}", exc_info=True)
         logger.warning(f"Warning - Dify conversation ID: {dify_conversation_id}")
-        logger.warning(f"Info - Chatwoot conversation ID: {chatwoot_conversation_id}")
+        logger.warning(f"Warning - Chatwoot conversation ID: {chatwoot_conversation_id}")
         # If it's an HTTP error, try to extract and log the response content
         if isinstance(e, httpx.HTTPStatusError) and hasattr(e, "response"):
             logger.error(f"Response content: {e.response.text}")
+        # Set conversation status to open on error
+        if chatwoot_conversation_id:
+            try:
+                logger.info(f"Setting Chatwoot conversation {chatwoot_conversation_id} status to 'open' due to error")
+                chatwoot = ChatwootHandler()
+                # Use the proper method from ChatwootHandler that already exists
+                result = chatwoot.toggle_status_sync(conversation_id=int(chatwoot_conversation_id), status="open")
+                logger.info(f"Successfully set conversation {chatwoot_conversation_id} status to 'open'")
+            except Exception as status_error:
+                logger.error(f"Failed to set conversation {chatwoot_conversation_id} status to 'open': {status_error}")
+
         raise e from e
 
 

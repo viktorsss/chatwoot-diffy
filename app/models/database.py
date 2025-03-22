@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from sqlmodel import Field, SQLModel
 
@@ -50,14 +50,14 @@ class ChatwootConversation(SQLModel):
 class ChatwootMessage(SQLModel):
     id: int
     content: str
-    message_type: str  # This will be "incoming" or "outgoing"
+    message_type: Literal["incoming", "outgoing"]
     conversation: ChatwootConversation
     sender: ChatwootSender
 
 
 class ChatwootWebhook(SQLModel):
     event: str
-    message_type: str  # From payload["message_type"]
+    message_type: Literal["incoming", "outgoing"]  # TODO: ideally remove this
     sender: Optional[ChatwootSender] = None  # From payload["sender"]
     message: Optional[ChatwootMessage] = None
     conversation: Optional[ChatwootConversation] = None

@@ -66,6 +66,10 @@ HTTPX_READ_TIMEOUT = float(os.getenv("HTTPX_READ_TIMEOUT", "120.0"))
 HTTPX_WRITE_TIMEOUT = float(os.getenv("HTTPX_WRITE_TIMEOUT", "30.0"))
 HTTPX_POOL_TIMEOUT = float(os.getenv("HTTPX_POOL_TIMEOUT", "30.0"))
 
+# some hardcoded string
+
+SKIPPED_MESSAGE = "Sorry, I'm having trouble processing your message right now."
+
 
 def valid_statuses() -> List[str]:
     valid = ["open", "pending", "resolved", "snoozed", "closed"]
