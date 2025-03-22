@@ -23,6 +23,7 @@ dependencies = [
     "opentelemetry-instrumentation-httpx>=0.41b0",
     "opentelemetry-exporter-otlp>=1.20.0",
     "asyncpg>=0.30.0",
+    "sentry-sdk[fastapi]>=2.24.0",
 ]
 
 [project.optional-dependencies]

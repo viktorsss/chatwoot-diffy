@@ -211,3 +211,5 @@ wrapt==1.17.2
     #   opentelemetry-instrumentation-sqlalchemy
 zipp==3.21.0
     # via importlib-metadata
+sentry-sdk[fastapi]==2.24.0
+    # via chatwoot-handler (pyproject.toml)
