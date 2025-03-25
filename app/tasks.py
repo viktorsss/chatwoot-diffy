@@ -2,7 +2,7 @@ import logging
 from typing import Any, Dict, Optional
 
 import httpx
-from celery import Celery
+from celery import Celery, signals
 from dotenv import load_dotenv
 
 from . import config
@@ -10,6 +10,7 @@ from .api.chatwoot import ChatwootHandler
 from .config import SKIPPED_MESSAGE
 from .database import SessionLocal
 from .models.database import Dialogue, DifyResponse
+from .utils.sentry import init_sentry
 
 load_dotenv()
 
@@ -47,6 +48,20 @@ logger.propagate = True
 
 celery = Celery("tasks")
 celery.config_from_object(config, namespace="CELERY")
+
+
+# Initialize Sentry on Celery daemon startup
+@signals.celeryd_init.connect
+def init_sentry_for_celery(**_kwargs):
+    if init_sentry(with_fastapi=False, with_asyncpg=False, with_celery=True):
+        logger.info("Celery daemon: Sentry initialized via celeryd_init signal")
+
+
+# Initialize Sentry on each worker process startup
+@signals.worker_init.connect
+def init_sentry_for_worker(**_kwargs):
+    if init_sentry(with_fastapi=False, with_asyncpg=False, with_celery=True):
+        logger.info("Celery worker: Sentry initialized via worker_init signal")
 
 
 def make_dify_request(url: str, data: dict, headers: dict) -> dict:
