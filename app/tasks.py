@@ -10,8 +10,13 @@ from .api.chatwoot import ChatwootHandler
 from .config import SKIPPED_MESSAGE
 from .database import SessionLocal
 from .models.database import Dialogue, DifyResponse
+from .utils.sentry import init_sentry
 
 load_dotenv()
+
+# Initialize Sentry for Celery workers with only Celery integration
+if init_sentry(with_fastapi=False, with_asyncpg=False, with_celery=True):
+    logging.info("Celery worker: Sentry initialized")
 
 # Use timeout constants from config
 HTTPX_TIMEOUT = httpx.Timeout(
