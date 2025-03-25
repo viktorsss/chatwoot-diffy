@@ -1,4 +1,5 @@
 import logging
+import sys
 from typing import Any, Dict, Optional
 
 import httpx
@@ -14,9 +15,11 @@ from .utils.sentry import init_sentry
 
 load_dotenv()
 
-# Initialize Sentry for Celery workers with only Celery integration
-if init_sentry(with_fastapi=False, with_asyncpg=False, with_celery=True):
-    logging.info("Celery worker: Sentry initialized")
+# Initialize Sentry for Celery workers when this module is loaded directly by Celery
+# This handles the case when celery_worker.py is not used (e.g. with direct celery -A app.tasks command)
+if "celery" in sys.argv[0].lower() and __name__ != "__main__":
+    if init_sentry(with_fastapi=False, with_asyncpg=False, with_celery=True):
+        logging.info("Celery worker: Sentry initialized from tasks module")
 
 # Use timeout constants from config
 HTTPX_TIMEOUT = httpx.Timeout(
