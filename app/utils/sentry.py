@@ -33,6 +33,7 @@ def init_sentry(with_fastapi=True, with_asyncpg=True, with_celery=True, custom_i
         bool: Whether Sentry was initialized
     """
     if not SENTRY_DSN:
+        logging.warning("Sentry DSN is not set, skipping initialization")
         return False
 
     # Get the log level from config
