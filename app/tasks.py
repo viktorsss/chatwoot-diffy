@@ -114,10 +114,11 @@ def process_message_with_dify(
             result = response.json()
             return result
     except Exception as e:
-        logger.critical(f"Critical error processing message with Dify: {e}", exc_info=True)
-        logger.error(f"Error processing message with Dify: {e}", exc_info=True)
-        logger.warning(f"Warning - Dify conversation ID: {dify_conversation_id}")
-        logger.warning(f"Warning - Chatwoot conversation ID: {chatwoot_conversation_id}")
+        logger.critical(
+            f"Critical error processing message with Dify: {e} \n"
+            f"conversation_id: {dify_conversation_id} \n chatwoot_conversation_id: {chatwoot_conversation_id}",
+            exc_info=True,
+        )
         # If it's an HTTP error, try to extract and log the response content
         if isinstance(e, httpx.HTTPStatusError) and hasattr(e, "response"):
             logger.error(f"Response content: {e.response.text}")
