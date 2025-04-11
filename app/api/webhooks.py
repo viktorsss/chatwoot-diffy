@@ -211,7 +211,7 @@ async def update_custom_attributes(
             "custom_attributes": "No custom attrs provided",
         }
     try:
-        result = await chatwoot.patch_custom_attributes(
+        result = await chatwoot.update_custom_attributes(
             conversation_id=conversation_id, custom_attributes=custom_attributes
         )
         logger.info(f"Updated custom attributes for conversation {conversation_id}: {result}")
