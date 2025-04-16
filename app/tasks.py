@@ -88,7 +88,7 @@ def process_message_with_dify(
     url = f"{config.DIFY_API_URL}/chat-messages"
     headers = {"Authorization": f"Bearer {config.DIFY_API_KEY}", "Content-Type": "application/json"}
 
-    # https://github.com/langgenius/dify/issues/11140 IMPORTANT : `inputs` are cached for conversation
+    logger.info(f"Processing message with Dify: {message}, direction: {message_type}")
     data = {
         "query": message,
         "inputs": {

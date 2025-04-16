@@ -84,8 +84,8 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
     logger.debug(f"Webhook payload: {payload}")
 
     if webhook_data.event == "message_created":
-        print(f"Webhook data: {webhook_data}")
-        if webhook_data.sender_type in ["agent_bot", "????"]:
+        logger.info(f"Webhook data: {webhook_data}")
+        if webhook_data.sender_type in ["agent_bot", "????"]:  # бот не реагирует на свои мессаги
             logger.info(f"Skipping agent_bot message: {webhook_data.content}")
             return {"status": "skipped", "reason": "agent_bot message"}
         # conversation_is_open = webhook_data.status == "open"

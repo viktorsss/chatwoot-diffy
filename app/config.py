@@ -41,6 +41,7 @@ DIFY_MAX_TOKENS = int(os.getenv("DIFY_MAX_TOKENS", "2000"))
 # Chatwoot configuration
 CHATWOOT_API_URL = os.getenv("CHATWOOT_API_URL", "https://app.chatwoot.com/api/v1")
 CHATWOOT_API_KEY = os.getenv("CHATWOOT_API_KEY", "")
+CHATWOOT_ADMIN_API_KEY = os.getenv("CHATWOOT_ADMIN_API_KEY", "")
 CHATWOOT_ACCOUNT_ID = os.getenv("CHATWOOT_ACCOUNT_ID", "1")
 ALLOWED_CONVERSATION_STATUSES = os.getenv("ALLOWED_CONVERSATION_STATUSES", "open,pending").split(",")
 
