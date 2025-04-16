@@ -7,14 +7,12 @@ from dotenv import load_dotenv
 
 from . import config
 from .api.chatwoot import ChatwootHandler
-from .config import SKIPPED_MESSAGE
+from .config import BOT_ERROR_MESSAGE
 from .database import SessionLocal
 from .models.database import Dialogue, DifyResponse
 from .utils.sentry import init_sentry
 
 load_dotenv()
-
-BOT_ERROR_MESSAGE = "Ой! Наш бот сломался, но ваш диалог переведён к операторам. Не переживайте, с вами свяжутся!"
 
 # Use timeout constants from config
 HTTPX_TIMEOUT = httpx.Timeout(
@@ -85,7 +83,7 @@ def process_message_with_dify(
     """
     Process a message with Dify and return the response as a dictionary.
     """
-    if message.startswith(SKIPPED_MESSAGE):
+    if message.startswith(BOT_ERROR_MESSAGE):
         return {"status": "skipped", "reason": "agent_bot message"}
     url = f"{config.DIFY_API_URL}/chat-messages"
     headers = {"Authorization": f"Bearer {config.DIFY_API_KEY}", "Content-Type": "application/json"}

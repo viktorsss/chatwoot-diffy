@@ -77,7 +77,7 @@ SENTRY_SEND_DEFAULT_PII = os.getenv("SENTRY_SEND_DEFAULT_PII", "False").lower() 
 
 # some hardcoded string
 
-SKIPPED_MESSAGE = "Sorry, I'm having trouble processing your message right now."
+BOT_ERROR_MESSAGE = "Ой! Наш бот сломался, но ваш диалог переведён к операторам. Не переживайте, с вами свяжутся!"
 
 
 def valid_statuses() -> List[str]:

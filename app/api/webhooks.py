@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from .. import tasks
-from ..config import SKIPPED_MESSAGE
+from ..config import BOT_ERROR_MESSAGE
 from ..database import get_db
 from ..models.database import ChatwootWebhook, Dialogue, DialogueCreate
 from ..models.non_database import ConversationPriority, ConversationStatus
@@ -93,7 +93,7 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
         # if not webhook_data.message:
         #     logger.info(f"Skipping message with empty content: {webhook_data}")
         #     return {"status": "skipped", "reason": "empty message"}
-        if str(webhook_data.content).startswith(SKIPPED_MESSAGE):
+        if str(webhook_data.content).startswith(BOT_ERROR_MESSAGE):
             logger.info(f"Skipping agent_bot message: {webhook_data.content}")
             return {"status": "skipped", "reason": "agent_bot message"}
 
@@ -129,7 +129,7 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
                 logger.error(f"Failed to process message with Dify: {e}")
                 await send_chatwoot_message(
                     conversation_id=webhook_data.conversation_id,
-                    message=SKIPPED_MESSAGE,
+                    message=BOT_ERROR_MESSAGE,
                     is_private=False,
                     db=db,
                 )
