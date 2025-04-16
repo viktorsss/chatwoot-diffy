@@ -12,6 +12,7 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    if: github.repository == 'eremeye/chatwoot-dify'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -39,4 +40,4 @@ jobs:
       - name: Trigger deployment webhook
         if: success()
         run: |
-          curl -X POST ${{ secrets.DEV_DEPLOY_WEBHOOK }} 
+          curl -X POST ${{ secrets.DEV_DEPLOY_WEBHOOK }}
