@@ -36,3 +36,7 @@ https://<ссылка на bridge>/api/v1/chatwoot-webhook`
 2) прописать туда `TEST_CONVERSATION_ID=<айдишник дилога, видно в логах и dev tools браузера>`, написав боту со своего акка.
 3) `uv pip install -e ".[dev]"` (uv прекрасный пакетный мендежер для питона на rust : https://docs.astral.sh/uv/getting-started/installation/)
 4) `python -m pytest`
+
+# Штуки для удобства
+
+В setup_chatwoot_config.ipynb живёт пример как удобно по api залить команды и csutom attributes. Важно : нужны админ права для апи (в super admin console в чатвуте берётся ключ)
