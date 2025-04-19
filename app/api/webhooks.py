@@ -295,6 +295,35 @@ async def get_chatwoot_conversation_id(dify_conversation_id: str, db: AsyncSessi
     }
 
 
+@router.get("/dialogue-info/{chatwoot_conversation_id}")
+async def get_dialogue_info(chatwoot_conversation_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Retrieve dialogue information, including the Dify conversation ID,
+    based on the Chatwoot conversation ID. Used for testing/debugging.
+    """
+    logger.debug(f"Received request for dialogue info for Chatwoot convo ID: {chatwoot_conversation_id}")
+    statement = select(Dialogue).where(Dialogue.chatwoot_conversation_id == str(chatwoot_conversation_id))
+    result = await db.execute(statement)
+    dialogue = result.scalar_one_or_none()
+
+    if not dialogue:
+        logger.warning(f"Dialogue not found for Chatwoot convo ID: {chatwoot_conversation_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Dialogue not found for Chatwoot conversation ID {chatwoot_conversation_id}"
+        )
+
+    logger.debug(
+        f"Found dialogue for Chatwoot convo ID {chatwoot_conversation_id}: Dify ID = {dialogue.dify_conversation_id}"
+    )
+    return {
+        "chatwoot_conversation_id": dialogue.chatwoot_conversation_id,
+        "dify_conversation_id": dialogue.dify_conversation_id,
+        "status": dialogue.status,
+        "created_at": dialogue.created_at,
+        "updated_at": dialogue.updated_at,
+    }
+
+
 async def update_team_cache():
     """Update the team name to ID mapping cache."""
     global team_cache, last_update_time
