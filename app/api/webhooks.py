@@ -127,12 +127,18 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
 
             except Exception as e:
                 logger.error(f"Failed to process message with Dify: {e}")
-                await send_chatwoot_message(
-                    conversation_id=webhook_data.conversation_id,
-                    message=BOT_ERROR_MESSAGE,
-                    is_private=False,
-                    db=db,
-                )
+                if webhook_data.conversation_id is not None:
+                    await send_chatwoot_message(
+                        conversation_id=webhook_data.conversation_id,
+                        message=BOT_ERROR_MESSAGE,
+                        is_private=False,
+                        db=db,
+                    )
+                else:
+                    logger.error(
+                        "Cannot send error message: conversation_id is "
+                        f"None in webhook data for event {webhook_data.event}"
+                    )
 
     elif webhook_data.event == "conversation_created":
         if not webhook_data.conversation:
@@ -318,7 +324,7 @@ async def get_dialogue_info(chatwoot_conversation_id: int, db: AsyncSession = De
     return {
         "chatwoot_conversation_id": dialogue.chatwoot_conversation_id,
         "dify_conversation_id": dialogue.dify_conversation_id,
-        "status": dialogue.status,
+        "status": dialogue.status,  # TODO: this probably can be outdated
         "created_at": dialogue.created_at,
         "updated_at": dialogue.updated_at,
     }

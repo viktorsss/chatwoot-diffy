@@ -9,6 +9,8 @@ import httpx
 import pytest
 from dotenv import load_dotenv
 
+from app.api.chatwoot import ChatwootHandler
+
 load_dotenv()
 
 # --- Configuration ---
@@ -19,8 +21,11 @@ CHATWOOT_API_KEY = os.getenv("CHATWOOT_API_KEY")
 CHATWOOT_ADMIN_API_KEY = os.getenv("CHATWOOT_ADMIN_API_KEY")  # Needed for team lookup
 TEST_INBOX_ID = int(os.getenv("CHATWOOT_TEST_INBOX_ID", "6"))
 
-if not all([CHATWOOT_API_URL, CHATWOOT_ACCOUNT_ID, CHATWOOT_API_KEY]):
-    pytest.fail("Required Chatwoot env vars missing", pytrace=False)
+if not all([CHATWOOT_API_URL, CHATWOOT_ACCOUNT_ID, CHATWOOT_API_KEY, CHATWOOT_ADMIN_API_KEY]):
+    pytest.fail("Required Chatwoot env vars missing (including admin key)", pytrace=False)
+
+# --- Instantiate ChatwootHandler ---
+chatwoot_handler = ChatwootHandler()
 
 # --- Constants ---
 API_TIMEOUT = 20.0
@@ -39,9 +44,34 @@ DIFY_CHECK_POLL_INTERVAL = 2  # Seconds between checks
 
 
 # --- Minimal Chatwoot API Helpers ---
+def extract_conversation_data(json_data):
+    """
+    Extract actual data from conversation JSON and format it according to the required schema.
+
+    Args:
+        json_data (dict): Input JSON data containing conversation information
+
+    Returns:
+        dict: Formatted JSON with team name, priority, and location
+    """
+    result = {}
+
+    # Extract team name - actual value from the data
+    if "meta" in json_data and "team" in json_data["meta"] and "name" in json_data["meta"]["team"]:
+        result["team"] = json_data["meta"]["team"]["name"]
+
+    # Extract priority - actual value from the data
+    if "priority" in json_data:
+        result["priority"] = json_data["priority"]
+
+    # Extract location - actual value from the data
+    if "custom_attributes" in json_data and "region" in json_data["custom_attributes"]:
+        result["location"] = json_data["custom_attributes"]["region"]
+
+    return result
 
 
-def _get_chatwoot_headers(admin: bool = False) -> Dict[str, str]:
+def _get_chatwoot_headers(admin: bool = True) -> Dict[str, str]:
     key = CHATWOOT_ADMIN_API_KEY if admin else CHATWOOT_API_KEY
     if not key:
         pytest.fail(f"Required API key missing (Admin: {admin})", pytrace=False)
@@ -63,6 +93,7 @@ def _make_chatwoot_request(method: str, url: str, is_admin: bool = False, **kwar
                 return response
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             print(f"    WARNING: Chatwoot API Error ({type(e).__name__}). Retrying...")
+            print(f" Error details: {e}")
             if attempt >= MAX_RETRIES - 1:
                 pytest.fail(f"Chatwoot API request failed: {e}", pytrace=False)
             time.sleep(RETRY_DELAY * (attempt + 1))
@@ -159,14 +190,6 @@ def delete_chatwoot_conversation(conversation_id: int):
                 print(f"  WARNING: Failed deleting conversation {conversation_id}: {response.status_code}")
     except Exception as e:
         print(f"  WARNING: Exception during conversation deletion {conversation_id}: {e}")
-
-
-def get_chatwoot_conversation(conversation_id: int) -> Dict[str, Any]:
-    """Fetches conversation details."""
-    url = f"{CHATWOOT_API_URL}/accounts/{CHATWOOT_ACCOUNT_ID}/conversations/{conversation_id}"
-    response = _make_chatwoot_request("GET", url)
-    data = response.json()
-    return data.get("payload", data)  # Handle potential wrapper
 
 
 def get_chatwoot_messages(conversation_id: int) -> List[Dict[str, Any]]:
@@ -276,7 +299,7 @@ def simulate_user_message_via_webhook(conversation_id: int, contact_id: int, mes
     print(f"  -> Simulating User Message (Step {step_num}): '{message_text[:100]}...'")
 
     # 1. Send Private Note Hack
-    private_note_content = f"[Test Step {step_num}] User sends: {message_text[:100]}..."
+    private_note_content = f"[Test Step {step_num}] User sends: {message_text}..."
     send_chatwoot_message(conversation_id, private_note_content, private=True)
     time.sleep(0.5)  # Small delay
 
@@ -319,18 +342,25 @@ def poll_for_bot_response(conversation_id: int, initial_message_count: int) -> b
     while time.time() - start_time < MAX_POLL_WAIT_TIME:
         time.sleep(POLL_INTERVAL)
         current_messages = get_chatwoot_messages(conversation_id)
-        if not current_messages and last_checked_count == 0:  # Handle case where initial fetch failed
-            continue  # Keep polling if we couldn't establish baseline
+        # Handle case where initial fetch failed or returns empty list unexpectedly
+        if not current_messages and last_checked_count <= 0:
+            # If baseline was 0 or failed (-1), and current is empty, keep polling
+            if last_checked_count == -1:
+                print("     Polling: Waiting for initial messages to appear or baseline fetch to succeed...")
+            continue  # Keep polling if we couldn't establish baseline or no messages yet
 
-        if len(current_messages) > last_checked_count:
-            # Check only *new* messages since last poll/initial count
-            newly_arrived = current_messages[last_checked_count:]
+        if len(current_messages) > last_checked_count or last_checked_count == -1:
+            # If baseline was uncertain (-1), check all messages
+            start_index = last_checked_count if last_checked_count != -1 else 0
+            newly_arrived = current_messages[start_index:]
+
             for msg in newly_arrived:
                 sender_type = msg.get("sender", {}).get("type") or msg.get("sender_type")
                 is_private = msg.get("private", False)
 
                 # Found a non-private message not from the original contact? Assume it's the bot/agent.
-                if not is_private and sender_type != SENDER_TYPE_CONTACT:
+                # Also check sender is not None to avoid matching system messages without senders
+                if not is_private and sender_type != SENDER_TYPE_CONTACT and msg.get("sender") is not None:
                     waited_time = time.time() - start_time
                     content_preview = (msg.get("content") or "")[:50]
                     print(
@@ -341,14 +371,19 @@ def poll_for_bot_response(conversation_id: int, initial_message_count: int) -> b
 
             # Update count if new messages arrived but were not the target bot response
             last_checked_count = len(current_messages)
+        # else: # Print dots only if no new messages at all
+        # print(".", end="", flush=True) # Optional: progress indicator
 
-    print(f"     TIMEOUT: No bot response detected within {MAX_POLL_WAIT_TIME}s.")
+    print(f"\n     TIMEOUT: No bot response detected within {MAX_POLL_WAIT_TIME}s.")
     return False
 
 
-def verify_dify_conversation_created(chatwoot_conversation_id: int):
-    """Checks the bridge API to confirm a Dify conversation ID exists."""
-    print(f"  --- Verifying Dify Conversation Creation (Max Wait: {DIFY_CHECK_WAIT_TIME}s) ---")
+def verify_bridge_dialogue_exists(chatwoot_conversation_id: int):
+    """
+    Checks the bridge API to confirm a dialogue record exists and has a Dify ID.
+    Logs the status found in the dialogue record.
+    """
+    print(f"  --- Verifying Bridge Dialogue Existence (Max Wait: {DIFY_CHECK_WAIT_TIME}s) ---")
     check_url = f"{BRIDGE_URL}/dialogue-info/{chatwoot_conversation_id}"
     start_time = time.time()
 
@@ -361,12 +396,16 @@ def verify_dify_conversation_created(chatwoot_conversation_id: int):
                 if response.status_code == 200:
                     data = response.json()
                     dify_id = data.get("dify_conversation_id")
+                    status = data.get("status")
                     if dify_id:
                         waited = time.time() - start_time
-                        print(f"    >>> Dify Conversation ID found: '{dify_id}' after {waited:.1f}s")
+                        print(
+                            f"    >>> Bridge Dialogue FOUND after {waited:.1f}s."
+                            f" Dify ID: '{dify_id}', Status: '{status}'"
+                        )
                         return  # Success!
                     else:
-                        print("    Dialogue found, but Dify ID is still missing. Retrying...")
+                        print(f"    Dialogue found, but Dify ID is missing. Status: '{status}'. Retrying...")
 
                 elif response.status_code == 404:
                     print("    Dialogue not found yet (404). Retrying...")
@@ -379,40 +418,42 @@ def verify_dify_conversation_created(chatwoot_conversation_id: int):
             print(f"    WARNING: Network error checking dialogue info: {e}. Retrying...")
         except Exception as e:
             # Catch broader errors during check
-            print(f"    WARNING: Error during Dify ID check: {type(e).__name__} - {e}. Retrying...")
+            print(f"    WARNING: Error during Bridge Dialogue check: {type(e).__name__} - {e}. Retrying...")
 
         time.sleep(DIFY_CHECK_POLL_INTERVAL)
 
     # If loop finishes without returning, it timed out
     error_message = (
-        f"TIMEOUT: Dify conversation ID not found for Chatwoot conversation {chatwoot_conversation_id} "
-        f"within {DIFY_CHECK_WAIT_TIME} seconds."
+        f"TIMEOUT: Bridge dia or Dify conversation ID not found for Chatwoot conversation {chatwoot_conversation_id} "
+        f"within {DIFY_CHECK_WAIT_TIME} seconds via {check_url}."
     )
     pytest.fail(error_message, pytrace=False)
 
 
-def verify_final_state(conversation_id: int, expected_attrs: Dict[str, Any]):
+async def verify_final_state(conversation_id: int, expected_attrs: Dict[str, Any]):
     """Asserts the final conversation state against expected values."""
     print("  --- Verifying Final State ---")
     try:
-        final_convo = get_chatwoot_conversation(conversation_id)
+        # Use the async ChatwootHandler method
+        final_convo = await chatwoot_handler.get_conversation_data(conversation_id)
     except Exception as e:
         fail_msg = f"Failed to fetch final state for conversation {conversation_id}: {e}"
         pytest.fail(fail_msg, pytrace=False)
+    final_convo_data = extract_conversation_data(final_convo)
 
-    actual_attributes = final_convo.get("custom_attributes", {})
-    actual_priority = final_convo.get("priority")
-    actual_team_id = final_convo.get("meta", {}).get("team", {}).get("id")
+    actual_attributes = final_convo_data.get("custom_attributes", {})
+    actual_priority = final_convo_data.get("priority")
+    actual_team = final_convo_data.get("team")
 
     print(f"  Expected Final State: {expected_attrs}")
-    print(f"  Actual Custom Attributes: {actual_attributes}")
-    print(f"  Actual Priority: {actual_priority}")
-    print(f"  Actual Team ID: {actual_team_id}")
+    print(f"  Actual Final State: {final_convo_data}")
 
     errors = []
 
     # Priority Check
     if "priority" in expected_attrs:
+        if expected_attrs["priority"] == "urgent":
+            expected_attrs["priority"] = "high"  # Договорились, что urgent ставят люди
         expected_priority = expected_attrs["priority"]
         # Allow "none" string to mean None/null
         if isinstance(expected_priority, str) and expected_priority.lower() == "none":
@@ -422,24 +463,11 @@ def verify_final_state(conversation_id: int, expected_attrs: Dict[str, Any]):
             errors.append(error_msg)
 
     # Team Check (Handle lookup by name)
-    expected_team_id = expected_attrs.get("team_id")
-    expected_team_name = expected_attrs.get("team")
-    final_expected_team_id = None
-    if expected_team_id is not None:
-        final_expected_team_id = expected_team_id
-    elif expected_team_name and isinstance(expected_team_name, str) and expected_team_name.lower() != "none":
-        looked_up_id = get_team_id_by_name(expected_team_name)  # Uses cache/admin key
-        if looked_up_id is None:
-            errors.append(f"Team Name Lookup Failed: '{expected_team_name}' not found.")
-        else:
-            final_expected_team_id = looked_up_id
-    elif expected_team_name and isinstance(expected_team_name, str) and expected_team_name.lower() == "none":
-        final_expected_team_id = None  # Explicitly expect no team
+    expected_team = expected_attrs.get("team")
 
-    # Only compare team if expectation was set
-    if "team" in expected_attrs or "team_id" in expected_attrs:
-        if actual_team_id != final_expected_team_id:
-            error_msg = f"Team ID: Expected {final_expected_team_id}, Got {actual_team_id}"
+    if "team" in expected_attrs:
+        if actual_team != expected_team:
+            error_msg = f"Team ID: Expected {expected_team}, Got {actual_team}"
             errors.append(error_msg)
 
     # Custom Attributes Check
@@ -465,7 +493,8 @@ def verify_final_state(conversation_id: int, expected_attrs: Dict[str, Any]):
 
 
 # --- The Test ---
-def test_conversation_flow(chatwoot_test_env):
+@pytest.mark.asyncio
+async def test_conversation_flow(chatwoot_test_env):
     """Runs a single test case flow."""
     case_name, case_data, contact_id, conversation_id = chatwoot_test_env
     print(f"\n--- Executing Test Case: {case_name} ---")
@@ -483,11 +512,11 @@ def test_conversation_flow(chatwoot_test_env):
                 initial_messages = get_chatwoot_messages(conversation_id)
                 last_message_count = len(initial_messages)
                 print(
-                    f"\n-- Step {step_num}/{len(messages_to_simulate)}: User Message (Baseline: {last_message_count} msgs) --"  # noqa: E501
+                    f"\n-- Step {step_num}/{len(messages_to_simulate)}: User Message (Baseline: {last_message_count} msgs) --"  # noqa E501
                 )
             except Exception as e:
                 print(
-                    f"  WARNING: Failed getting message count before step {step_num}. Polling may be inaccurate. Error: {e}"  # noqa: E501
+                    f"  WARNING: Failed getting message count before step {step_num}. Polling may be inaccurate. Error: {e}"  # noqa E501
                 )
                 last_message_count = -1  # Indicate baseline uncertainty
 
@@ -495,7 +524,7 @@ def test_conversation_flow(chatwoot_test_env):
 
             # --- Verification after FIRST user message ---
             if i == 0:
-                verify_dify_conversation_created(conversation_id)
+                verify_bridge_dialogue_exists(conversation_id)  # Use the renamed function
             # --- End verification ---
 
             # Poll for bot response if baseline count is reliable
@@ -503,11 +532,13 @@ def test_conversation_flow(chatwoot_test_env):
                 if not poll_for_bot_response(conversation_id, last_message_count):
                     # Decide if timeout is fatal. For now, just warn.
                     print(
-                        f"     WARNING: Test '{case_name}' proceeding without confirmed bot response for step {step_num}."  # noqa: E501
+                        f"     WARNING: Test '{case_name}' proceeding without confirmed bot response for step {step_num}."  # noqa E501
                     )
                     # pytest.fail(f"Timeout waiting for bot response after step {step_num}", pytrace=False)
             else:
                 print("     Skipping polling due to uncertain baseline message count.")
+                # Optional: Add a small fixed sleep if skipping polling entirely seems too fast
+                # time.sleep(POLL_INTERVAL)
         else:
             # Skip assistant message definitions in the JSON for now
             print(f"\n-- Step {step_num}/{len(messages_to_simulate)}: Assistant Message (Skipping Simulation) --")
@@ -519,6 +550,6 @@ def test_conversation_flow(chatwoot_test_env):
     print(f"  Waiting {final_wait}s before final verification...")
     time.sleep(final_wait)
 
-    verify_final_state(conversation_id, case_data.get("attributes_expected", {}))
+    await verify_final_state(conversation_id, case_data.get("attributes_expected", {}))
 
     print(f"\n--- Test Case {case_name}: PASSED ---")

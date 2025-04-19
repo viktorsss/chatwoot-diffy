@@ -97,7 +97,7 @@ class ChatwootHandler:
 
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=self.headers)
+                response = await client.get(url, headers=self.admin_headers)
                 response.raise_for_status()
                 return response.json()
         except httpx.HTTPStatusError as e:

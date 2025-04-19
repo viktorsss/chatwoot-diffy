@@ -1,6 +1,10 @@
 import os
 from typing import List
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Core application settings
 DEBUG = os.getenv("DEBUG", "False")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
