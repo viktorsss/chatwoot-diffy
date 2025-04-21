@@ -161,11 +161,30 @@ def process_message_with_dify(
                     # Update DB synchronously within the task
                     update_dialogue_dify_id_sync(chatwoot_conversation_id, new_dify_id)
                 else:
-                    # This case shouldn't happen if Dify is working correctly, but log a warning.
-                    logger.warning(
-                        f"Dify API call succeeded but did not return a 'conversation_id' when one was expected. "
+                    # --- MODIFIED: Error log and retry ---
+                    error_msg = (
+                        f"Dify API call succeeded (status {response.status_code}) but didn't return a 'conversation_id'"
+                        f"when one was expected (initial creation for chatwoot_convo_id={chatwoot_conversation_id}). "
                         f"Dify response: {result}"
                     )
+                    logger.error(error_msg)
+                    # Retry the task, maybe it was a temporary glitch in Dify returning the ID
+                    try:
+                        logger.warning(
+                            f"Retrying task due to missing conversation_id on creation "
+                            f"(attempt {self.request.retries + 1}/{self.max_retries})..."
+                        )
+                        # Using default retry delay configured for the task
+                        self.retry(exc=RuntimeError(error_msg), countdown=config.CELERY_RETRY_COUNTDOWN)
+                    except self.MaxRetriesExceededError:
+                        logger.error(
+                            f"Max retries exceeded for missing conversation_id on creation for "
+                            f"chatwoot_convo_id={chatwoot_conversation_id}. Failing task.",
+                            exc_info=True,
+                        )
+                        # Fall through to generic error handling below by raising the original error
+                        raise RuntimeError(error_msg) from None  # Reraise to trigger final error handling
+                    # --- END MODIFICATION ---
             # --- End Handle Conversation Creation ---
 
             return result  # Return successful result (contains first message answer)

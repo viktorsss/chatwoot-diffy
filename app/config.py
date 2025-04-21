@@ -34,6 +34,7 @@ CELERY_TASK_TIME_LIMIT = int(os.getenv("CELERY_TASK_TIME_LIMIT", "300"))
 CELERY_TASK_SOFT_TIME_LIMIT = int(os.getenv("CELERY_TASK_SOFT_TIME_LIMIT", "240"))
 CELERY_TASK_MAX_TASKS_PER_CHILD = int(os.getenv("CELERY_TASK_MAX_TASKS_PER_CHILD", "100"))
 CELERY_WORKER_PREFETCH_MULTIPLIER = int(os.getenv("CELERY_WORKER_PREFETCH_MULTIPLIER", "1"))
+CELERY_RETRY_COUNTDOWN = int(os.getenv("CELERY_RETRY_COUNTDOWN", "5"))
 
 # Dify.ai configuration
 DIFY_API_URL = os.getenv("DIFY_API_URL", "https://api.dify.ai/v1")
@@ -41,6 +42,9 @@ DIFY_API_KEY = os.getenv("DIFY_API_KEY", "")
 DIFY_RESPONSE_MODE = os.getenv("DIFY_RESPONSE_MODE", "blocking")
 DIFY_TEMPERATURE = float(os.getenv("DIFY_TEMPERATURE", "0.7"))
 DIFY_MAX_TOKENS = int(os.getenv("DIFY_MAX_TOKENS", "2000"))
+# Constants potentially used for polling/checking Dify conversation status (from tests)
+DIFY_CHECK_WAIT_TIME = int(os.getenv("DIFY_CHECK_WAIT_TIME", "15"))
+DIFY_CHECK_POLL_INTERVAL = int(os.getenv("DIFY_CHECK_POLL_INTERVAL", "2"))
 
 # Chatwoot configuration
 CHATWOOT_API_URL = os.getenv("CHATWOOT_API_URL", "https://app.chatwoot.com/api/v1")

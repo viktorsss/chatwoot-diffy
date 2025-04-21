@@ -9,6 +9,7 @@ import httpx
 import pytest
 from dotenv import load_dotenv
 
+from app import config
 from app.api.chatwoot import ChatwootHandler
 
 load_dotenv()
@@ -39,8 +40,6 @@ EVENT_MESSAGE_CREATED = "message_created"
 SENDER_TYPE_CONTACT = "contact"
 ROLE_USER = "user"
 # ROLE_ASSISTANT = "assistant" # Not strictly needed if we only verify end state
-DIFY_CHECK_WAIT_TIME = 15  # Seconds to wait for Dify convo ID to appear
-DIFY_CHECK_POLL_INTERVAL = 2  # Seconds between checks
 
 
 # --- Minimal Chatwoot API Helpers ---
@@ -383,11 +382,11 @@ def verify_bridge_dialogue_exists(chatwoot_conversation_id: int):
     Checks the bridge API to confirm a dialogue record exists and has a Dify ID.
     Logs the status found in the dialogue record.
     """
-    print(f"  --- Verifying Bridge Dialogue Existence (Max Wait: {DIFY_CHECK_WAIT_TIME}s) ---")
+    print(f"  --- Verifying Bridge Dialogue Existence (Max Wait: {config.DIFY_CHECK_WAIT_TIME}s) ---")
     check_url = f"{BRIDGE_URL}/dialogue-info/{chatwoot_conversation_id}"
     start_time = time.time()
 
-    while time.time() - start_time < DIFY_CHECK_WAIT_TIME:
+    while time.time() - start_time < config.DIFY_CHECK_WAIT_TIME:
         try:
             with httpx.Client(timeout=API_TIMEOUT) as client:
                 print(f"    Checking {check_url}...")
@@ -420,12 +419,12 @@ def verify_bridge_dialogue_exists(chatwoot_conversation_id: int):
             # Catch broader errors during check
             print(f"    WARNING: Error during Bridge Dialogue check: {type(e).__name__} - {e}. Retrying...")
 
-        time.sleep(DIFY_CHECK_POLL_INTERVAL)
+        time.sleep(config.DIFY_CHECK_POLL_INTERVAL)
 
     # If loop finishes without returning, it timed out
     error_message = (
         f"TIMEOUT: Bridge dia or Dify conversation ID not found for Chatwoot conversation {chatwoot_conversation_id} "
-        f"within {DIFY_CHECK_WAIT_TIME} seconds via {check_url}."
+        f"within {config.DIFY_CHECK_WAIT_TIME} seconds via {check_url}."
     )
     pytest.fail(error_message, pytrace=False)
 
