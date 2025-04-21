@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from .. import tasks
-from ..config import SKIPPED_MESSAGE
+from ..config import BOT_ERROR_MESSAGE
 from ..database import get_db
 from ..models.database import ChatwootWebhook, Dialogue, DialogueCreate
 from ..models.non_database import ConversationPriority, ConversationStatus
@@ -84,8 +84,8 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
     logger.debug(f"Webhook payload: {payload}")
 
     if webhook_data.event == "message_created":
-        print(f"Webhook data: {webhook_data}")
-        if webhook_data.sender_type in ["agent_bot", "????"]:
+        logger.info(f"Webhook data: {webhook_data}")
+        if webhook_data.sender_type in ["agent_bot", "????"]:  # бот не реагирует на свои мессаги
             logger.info(f"Skipping agent_bot message: {webhook_data.content}")
             return {"status": "skipped", "reason": "agent_bot message"}
         # conversation_is_open = webhook_data.status == "open"
@@ -93,7 +93,7 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
         # if not webhook_data.message:
         #     logger.info(f"Skipping message with empty content: {webhook_data}")
         #     return {"status": "skipped", "reason": "empty message"}
-        if str(webhook_data.content).startswith(SKIPPED_MESSAGE):
+        if str(webhook_data.content).startswith(BOT_ERROR_MESSAGE):
             logger.info(f"Skipping agent_bot message: {webhook_data.content}")
             return {"status": "skipped", "reason": "agent_bot message"}
 
@@ -127,12 +127,18 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
 
             except Exception as e:
                 logger.error(f"Failed to process message with Dify: {e}")
-                await send_chatwoot_message(
-                    conversation_id=webhook_data.conversation_id,
-                    message=SKIPPED_MESSAGE,
-                    is_private=False,
-                    db=db,
-                )
+                if webhook_data.conversation_id is not None:
+                    await send_chatwoot_message(
+                        conversation_id=webhook_data.conversation_id,
+                        message=BOT_ERROR_MESSAGE,
+                        is_private=False,
+                        db=db,
+                    )
+                else:
+                    logger.error(
+                        "Cannot send error message: conversation_id is "
+                        f"None in webhook data for event {webhook_data.event}"
+                    )
 
     elif webhook_data.event == "conversation_created":
         if not webhook_data.conversation:
@@ -292,6 +298,35 @@ async def get_chatwoot_conversation_id(dify_conversation_id: str, db: AsyncSessi
         "chatwoot_conversation_id": dialogue.chatwoot_conversation_id,
         "status": dialogue.status,
         "assignee_id": dialogue.assignee_id,
+    }
+
+
+@router.get("/dialogue-info/{chatwoot_conversation_id}")
+async def get_dialogue_info(chatwoot_conversation_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Retrieve dialogue information, including the Dify conversation ID,
+    based on the Chatwoot conversation ID. Used for testing/debugging.
+    """
+    logger.debug(f"Received request for dialogue info for Chatwoot convo ID: {chatwoot_conversation_id}")
+    statement = select(Dialogue).where(Dialogue.chatwoot_conversation_id == str(chatwoot_conversation_id))
+    result = await db.execute(statement)
+    dialogue = result.scalar_one_or_none()
+
+    if not dialogue:
+        logger.warning(f"Dialogue not found for Chatwoot convo ID: {chatwoot_conversation_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Dialogue not found for Chatwoot conversation ID {chatwoot_conversation_id}"
+        )
+
+    logger.debug(
+        f"Found dialogue for Chatwoot convo ID {chatwoot_conversation_id}: Dify ID = {dialogue.dify_conversation_id}"
+    )
+    return {
+        "chatwoot_conversation_id": dialogue.chatwoot_conversation_id,
+        "dify_conversation_id": dialogue.dify_conversation_id,
+        "status": dialogue.status,  # TODO: this probably can be outdated
+        "created_at": dialogue.created_at,
+        "updated_at": dialogue.updated_at,
     }
 
 

@@ -9,17 +9,45 @@ logger = logging.getLogger(__name__)
 
 
 class ChatwootHandler:
-    def __init__(self, api_url: str | None = None, api_key: str | None = None, account_id: str | None = None):
+    def __init__(
+        self,
+        api_url: str | None = None,
+        api_key: str | None = None,
+        account_id: str | None = None,
+        admin_api_key: str | None = None,
+    ):
         self.api_url = api_url or config.CHATWOOT_API_URL
         self.account_id = account_id or config.CHATWOOT_ACCOUNT_ID
         self.api_key = api_key or config.CHATWOOT_API_KEY
+        self.admin_api_key = admin_api_key or config.CHATWOOT_ADMIN_API_KEY
         self.headers = {
             "api_access_token": self.api_key,
+            "Content-Type": "application/json",
+        }
+        self.admin_headers = {
+            "api_access_token": self.admin_api_key,
             "Content-Type": "application/json",
         }
         # Base URLs
         self.account_url = f"{self.api_url}/accounts/{self.account_id}"
         self.conversations_url = f"{self.account_url}/conversations"
+
+    def send_message_sync(self, conversation_id: int, message: str, private: bool = False):
+        """Synchronous version of send_message for use in Celery tasks"""
+        import httpx
+
+        url = f"{self.conversations_url}/{conversation_id}/messages"
+
+        data = {
+            "content": message,
+            "message_type": "outgoing",
+            "private": private,
+        }
+
+        with httpx.Client() as client:
+            response = client.post(url, json=data, headers=self.headers, timeout=30.0)
+            response.raise_for_status()
+            return response.json()
 
     async def send_message(
         self,
@@ -69,7 +97,7 @@ class ChatwootHandler:
 
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=self.headers)
+                response = await client.get(url, headers=self.admin_headers)
                 response.raise_for_status()
                 return response.json()
         except httpx.HTTPStatusError as e:
@@ -143,23 +171,6 @@ class ChatwootHandler:
                 exc_info=True,
             )
             raise
-
-    def send_message_sync(self, conversation_id: int, message: str, private: bool = False):
-        """Synchronous version of send_message for use in Celery tasks"""
-        import httpx
-
-        url = f"{self.conversations_url}/{conversation_id}/messages"
-
-        data = {
-            "content": message,
-            "message_type": "outgoing",
-            "private": private,
-        }
-
-        with httpx.Client() as client:
-            response = client.post(url, json=data, headers=self.headers, timeout=30.0)
-            response.raise_for_status()
-            return response.json()
 
     async def assign_team(
         self, conversation_id: int, team_id: int = 0, team_name: Optional[str] = None
@@ -278,7 +289,7 @@ class ChatwootHandler:
 
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=self.headers)
+                response = await client.get(url, headers=self.admin_headers)
                 response.raise_for_status()
                 return response.json()
         except httpx.HTTPStatusError as e:

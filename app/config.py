@@ -1,6 +1,10 @@
 import os
 from typing import List
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Core application settings
 DEBUG = os.getenv("DEBUG", "False")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -30,6 +34,7 @@ CELERY_TASK_TIME_LIMIT = int(os.getenv("CELERY_TASK_TIME_LIMIT", "300"))
 CELERY_TASK_SOFT_TIME_LIMIT = int(os.getenv("CELERY_TASK_SOFT_TIME_LIMIT", "240"))
 CELERY_TASK_MAX_TASKS_PER_CHILD = int(os.getenv("CELERY_TASK_MAX_TASKS_PER_CHILD", "100"))
 CELERY_WORKER_PREFETCH_MULTIPLIER = int(os.getenv("CELERY_WORKER_PREFETCH_MULTIPLIER", "1"))
+CELERY_RETRY_COUNTDOWN = int(os.getenv("CELERY_RETRY_COUNTDOWN", "5"))
 
 # Dify.ai configuration
 DIFY_API_URL = os.getenv("DIFY_API_URL", "https://api.dify.ai/v1")
@@ -37,10 +42,14 @@ DIFY_API_KEY = os.getenv("DIFY_API_KEY", "")
 DIFY_RESPONSE_MODE = os.getenv("DIFY_RESPONSE_MODE", "blocking")
 DIFY_TEMPERATURE = float(os.getenv("DIFY_TEMPERATURE", "0.7"))
 DIFY_MAX_TOKENS = int(os.getenv("DIFY_MAX_TOKENS", "2000"))
+# Constants potentially used for polling/checking Dify conversation status (from tests)
+DIFY_CHECK_WAIT_TIME = int(os.getenv("DIFY_CHECK_WAIT_TIME", "15"))
+DIFY_CHECK_POLL_INTERVAL = int(os.getenv("DIFY_CHECK_POLL_INTERVAL", "2"))
 
 # Chatwoot configuration
 CHATWOOT_API_URL = os.getenv("CHATWOOT_API_URL", "https://app.chatwoot.com/api/v1")
 CHATWOOT_API_KEY = os.getenv("CHATWOOT_API_KEY", "")
+CHATWOOT_ADMIN_API_KEY = os.getenv("CHATWOOT_ADMIN_API_KEY", "")
 CHATWOOT_ACCOUNT_ID = os.getenv("CHATWOOT_ACCOUNT_ID", "1")
 ALLOWED_CONVERSATION_STATUSES = os.getenv("ALLOWED_CONVERSATION_STATUSES", "open,pending").split(",")
 
@@ -77,7 +86,7 @@ SENTRY_SEND_DEFAULT_PII = os.getenv("SENTRY_SEND_DEFAULT_PII", "False").lower() 
 
 # some hardcoded string
 
-SKIPPED_MESSAGE = "Sorry, I'm having trouble processing your message right now."
+BOT_ERROR_MESSAGE = "Ой! Наш бот сломался, но ваш диалог переведён к операторам. Не переживайте, с вами свяжутся!"
 
 
 def valid_statuses() -> List[str]:

@@ -21,11 +21,16 @@ Dify снэпшотит `inputs` для диалога в базе : https://git
 # Как деплоить
 
 Важно : ссылку на вебхук надо прописать для Agent Bot в Super Admin консоли chatwoot : `Outgoing url
-https://<ссылка на bridge>/api/v1/chatwoot-webhook`
+https://<ссылка на bridge>/api/v1/chatwoot-webhook`.
 
 Ссылка на корень сервиса должна быть в env vars пайплайна в dify `bridge_api_url = https:///<ссылка на bridge>/api/v1`
 
 Не забыть из нужного dify пайплайна/бота взять его апи ключ и прописать в энв как `DIFY_API_KEY`, именно по этому ключу dify не только впускает, но и понимает, какой пайплайн запускать.
+
+Чтобы подключить инбокс к боту, надо его явныс образом его туда добавить, предварительно убедившись, что в Super Admin Console проставлена галка для Agent Bots для акка.
+
+Админ юзер должен быть во всех тимах, чтобы для диалогов этих тим не ломался эндпойнт `get_conversation_data`
+
 
 Дальше `docker-compose up` должно хватить.
 
@@ -36,3 +41,7 @@ https://<ссылка на bridge>/api/v1/chatwoot-webhook`
 2) прописать туда `TEST_CONVERSATION_ID=<айдишник дилога, видно в логах и dev tools браузера>`, написав боту со своего акка.
 3) `uv pip install -e ".[dev]"` (uv прекрасный пакетный мендежер для питона на rust : https://docs.astral.sh/uv/getting-started/installation/)
 4) `python -m pytest`
+
+# Штуки для удобства
+
+В setup_chatwoot_config.ipynb живёт пример как удобно по api залить команды и csutom attributes. Важно : нужны админ права для апи (в super admin console в чатвуте берётся ключ)
