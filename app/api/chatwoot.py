@@ -242,7 +242,13 @@ class ChatwootHandler:
             logger.error(f"Failed to create custom attribute definition: {e}")
             raise
 
-    async def toggle_status(self, conversation_id: int, status: str) -> Dict[str, Any]:
+    async def toggle_status(
+        self,
+        conversation_id: int,
+        status: str,
+        previous_status: Optional[str] = None,
+        is_error_transition: bool = False,
+    ) -> Dict[str, Any]:
         """Toggle conversation status
         Valid statuses: 'open', 'resolved', 'pending', 'snoozed'
         """
@@ -253,6 +259,27 @@ class ChatwootHandler:
             async with httpx.AsyncClient() as client:
                 response = await client.post(url, json=data, headers=self.headers)
                 response.raise_for_status()
+
+                # Send internal notification if status changed from pending to open
+                # due to an error
+                if status == "open" and previous_status == "pending" and is_error_transition:
+                    try:
+                        logger.info(
+                            f"Conversation {conversation_id} changed from pending to"
+                            "open due to error, sending internal notification."
+                        )
+                        await self.send_message(
+                            conversation_id=conversation_id,
+                            message=config.BOT_ERROR_MESSAGE_INTERNAL,
+                            # Use new internal error message
+                            private=True,
+                        )
+                    except Exception as e_notify:
+                        logger.error(
+                            "Failed to send 'pending to open internal error'"
+                            f"notification for convo {conversation_id}: {e_notify}"
+                        )
+
                 return response.json()
         except httpx.HTTPStatusError as e:
             logger.error(
@@ -263,7 +290,13 @@ class ChatwootHandler:
             )
             raise
 
-    def toggle_status_sync(self, conversation_id: int, status: str) -> Dict[str, Any]:
+    def toggle_status_sync(
+        self,
+        conversation_id: int,
+        status: str,
+        previous_status: Optional[str] = None,
+        is_error_transition: bool = False,
+    ) -> Dict[str, Any]:
         """Toggle conversation status synchronously
         Valid statuses: 'open', 'resolved', 'pending', 'snoozed'
         """
@@ -274,6 +307,26 @@ class ChatwootHandler:
             with httpx.Client() as client:
                 response = client.post(url, json=data, headers=self.headers)
                 response.raise_for_status()
+
+                # Send internal notification if status changed from pending to open
+                # due to an error
+                if status == "open" and previous_status == "pending" and is_error_transition:
+                    try:
+                        logger.info(
+                            f"Conversation {conversation_id} (sync) changed from pending to open due to error,"
+                            "sending internal notification."
+                        )
+                        self.send_message_sync(
+                            conversation_id=conversation_id,
+                            message=config.BOT_ERROR_MESSAGE_INTERNAL,
+                            private=True,
+                        )
+                    except Exception as e_notify:
+                        logger.error(
+                            "Failed to send 'pending to open internal error' notification (sync)"
+                            f" for convo {conversation_id}: {e_notify}"
+                        )
+
                 return response.json()
         except httpx.HTTPStatusError as e:
             logger.error(

@@ -81,12 +81,28 @@ SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", "development")
 SENTRY_TRACES_SAMPLE_RATE = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1"))
 SENTRY_PROFILES_SAMPLE_RATE = float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE", "0.1"))
 SENTRY_LOG_LEVEL = os.getenv("SENTRY_LOG_LEVEL", "WARNING")
-SENTRY_ATTACH_STACKTRACE = os.getenv("SENTRY_ATTACH_STACKTRACE", "True").lower() in ("true", "1", "t")
-SENTRY_SEND_DEFAULT_PII = os.getenv("SENTRY_SEND_DEFAULT_PII", "False").lower() in ("true", "1", "t")
+SENTRY_ATTACH_STACKTRACE = os.getenv("SENTRY_ATTACH_STACKTRACE", "True").lower() in (
+    "true",
+    "1",
+    "t",
+)
+SENTRY_SEND_DEFAULT_PII = os.getenv("SENTRY_SEND_DEFAULT_PII", "False").lower() in (
+    "true",
+    "1",
+    "t",
+)
 
 # some hardcoded string
 
-BOT_ERROR_MESSAGE = "Ой! Наш бот сломался, но ваш диалог переведён к операторам. Не переживайте, с вами свяжутся!"
+BOT_ERROR_MESSAGE_INTERNAL = os.getenv(
+    "BOT_ERROR_MESSAGE_INTERNAL",
+    "Бот неожиданно сломался, диалог переведён в открытые",
+)
+
+BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL = os.getenv(
+    "BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL",
+    "Ваш диалог переведён к операторам. Не переживайте, с вами свяжутся!",
+)
 
 
 def valid_statuses() -> List[str]:

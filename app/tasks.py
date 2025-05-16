@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 from . import config
 from .api.chatwoot import ChatwootHandler
-from .config import BOT_ERROR_MESSAGE
+from .config import BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL, BOT_ERROR_MESSAGE_INTERNAL
 from .database import SessionLocal
 from .models.database import Dialogue, DifyResponse
 from .utils.sentry import init_sentry
@@ -94,7 +94,8 @@ def update_dialogue_dify_id_sync(chatwoot_convo_id: str, new_dify_id: str):
                 )
         except Exception as e:
             logger.error(
-                f"Failed to update dify_conversation_id for chatwoot_convo_id={chatwoot_convo_id}: {e}", exc_info=True
+                f"Failed to update dify_conversation_id for chatwoot_convo_id={chatwoot_convo_id}: {e}",
+                exc_info=True,
             )
             db.rollback()  # Rollback on error
 
@@ -113,10 +114,15 @@ def process_message_with_dify(
     Handles initial conversation creation if dify_conversation_id is None.
     Retries on 404 if an existing dify_conversation_id is provided but not found.
     """
-    if message.startswith(BOT_ERROR_MESSAGE):
+    # Prevent bot from replying to its own error or status messages
+    if message.startswith(BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL) or message.startswith(BOT_ERROR_MESSAGE_INTERNAL):
+        logger.info(f"Skipping self-generated message: {message[:50]}...")
         return {"status": "skipped", "reason": "agent_bot message"}
     url = f"{config.DIFY_API_URL}/chat-messages"
-    headers = {"Authorization": f"Bearer {config.DIFY_API_KEY}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {config.DIFY_API_KEY}",
+        "Content-Type": "application/json",
+    }
 
     logger.info(
         f"Processing message with Dify for chatwoot_conversation_id={chatwoot_conversation_id}, "
@@ -175,7 +181,10 @@ def process_message_with_dify(
                             f"(attempt {self.request.retries + 1}/{self.max_retries})..."
                         )
                         # Using default retry delay configured for the task
-                        self.retry(exc=RuntimeError(error_msg), countdown=config.CELERY_RETRY_COUNTDOWN)
+                        self.retry(
+                            exc=RuntimeError(error_msg),
+                            countdown=config.CELERY_RETRY_COUNTDOWN,
+                        )
                     except self.MaxRetriesExceededError:
                         logger.error(
                             f"Max retries exceeded for missing conversation_id on creation for "
@@ -216,7 +225,8 @@ def process_message_with_dify(
         # Log other HTTP errors before falling through
         elif isinstance(e, httpx.HTTPStatusError):
             logger.error(
-                f"HTTP Error {e.response.status_code} processing Dify message: {e.response.text}", exc_info=True
+                f"HTTP Error {e.response.status_code} processing Dify message: {e.response.text}",
+                exc_info=True,
             )
             # Fall through to generic error handling
 
@@ -235,32 +245,70 @@ def process_message_with_dify(
             try:
                 logger.info(f"Setting Chatwoot conversation {chatwoot_conversation_id} status to 'open' due to error")
                 chatwoot = ChatwootHandler()
-                # Use the proper method from ChatwootHandler that already exists
-                result = chatwoot.toggle_status_sync(conversation_id=int(chatwoot_conversation_id), status="open")
-                logger.info(f"Successfully set conversation {chatwoot_conversation_id} status to 'open'")
+                current_status_before_toggle = conversation_status
+                # Set status to open, indicating it's an error transition for internal note
+                chatwoot.toggle_status_sync(
+                    conversation_id=int(chatwoot_conversation_id),
+                    status="open",
+                    previous_status=current_status_before_toggle,
+                    is_error_transition=True,  # Indicate this is an error-induced transition
+                )
+                logger.info(f"Successfully set conversation {chatwoot_conversation_id} status to 'open' (HTTP error)")
+
+                # Send public error message to the user
+                logger.info(f"Sending external error message to conversation {chatwoot_conversation_id}")
+                chatwoot.send_message_sync(
+                    conversation_id=int(chatwoot_conversation_id),
+                    message=config.BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
+                    private=False,
+                )
+
             except Exception as status_error:
-                logger.error(f"Failed to set conversation {chatwoot_conversation_id} status to 'open': {status_error}")
+                logger.error(
+                    f"Failed to set conversation {chatwoot_conversation_id} status to 'open'"
+                    f"or send error messages: {status_error}"
+                )
 
         raise e from e
 
     except Exception as e:  # Catch other non-HTTP errors
         logger.critical(
             f"Non-HTTP critical error processing message with Dify: {e} \n"
-            f"conversation_id: {dify_conversation_id} \n chatwoot_conversation_id: {chatwoot_conversation_id}",
+            f"conversation_id: {dify_conversation_id} \n "
+            f"chatwoot_conversation_id: {chatwoot_conversation_id}",
             exc_info=True,
         )
-        # Set conversation status to open on error
+        # Set conversation status to open on error and send messages
         if chatwoot_conversation_id:
             try:
                 logger.info(
                     f"Setting Chatwoot conversation {chatwoot_conversation_id} status to 'open' due to non-HTTP error"
                 )
                 chatwoot = ChatwootHandler()
-                # Use the proper method from ChatwootHandler that already exists
-                result = chatwoot.toggle_status_sync(conversation_id=int(chatwoot_conversation_id), status="open")
-                logger.info(f"Successfully set conversation {chatwoot_conversation_id} status to 'open'")
+                current_status_before_toggle = conversation_status
+                # Set status to open, indicating it's an error transition for internal note
+                chatwoot.toggle_status_sync(
+                    conversation_id=int(chatwoot_conversation_id),
+                    status="open",
+                    previous_status=current_status_before_toggle,
+                    is_error_transition=True,  # Indicate this is an error-induced transition
+                )
+                logger.info(
+                    f"Successfully set conversation {chatwoot_conversation_id} status to 'open' (non-HTTP error)"
+                )
+
+                # Send public error message to the user
+                logger.info(f"Sending external error message to conversation {chatwoot_conversation_id}")
+                chatwoot.send_message_sync(
+                    conversation_id=int(chatwoot_conversation_id),
+                    message=config.BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
+                    private=False,
+                )
             except Exception as status_error:
-                logger.error(f"Failed to set conversation {chatwoot_conversation_id} status to 'open': {status_error}")
+                logger.error(
+                    f"Failed to set conversation {chatwoot_conversation_id} status to 'open' or"
+                    f"send error messages (non-HTTP error): {status_error}"
+                )
 
         raise e from e
 
@@ -291,17 +339,10 @@ def handle_dify_response(dify_result: Dict[str, Any], conversation_id: int, dial
 @celery.task(name="app.tasks.handle_dify_error")
 def handle_dify_error(request: Dict[str, Any], exc: Exception, traceback: str, conversation_id: int):
     """Handle any errors from the Dify task"""
-    from .api.chatwoot import ChatwootHandler
+    # The import 'from .api.chatwoot import ChatwootHandler' and associated message sending logic
+    # have been removed as per new requirements. Only logging remains.
 
     logger.error(f"Dify task failed for conversation {conversation_id}: {exc} \n {request} \n {traceback}")
-
-    # Send message back to Chatwoot. Sync is okay because we use separate instance of ChatwootHandler
-    chatwoot = ChatwootHandler()
-    chatwoot.send_message_sync(
-        conversation_id=conversation_id,
-        message=BOT_ERROR_MESSAGE,
-        private=False,
-    )
 
 
 @celery.task(name="app.tasks.delete_dify_conversation")
@@ -310,7 +351,10 @@ def delete_dify_conversation(dify_conversation_id: str):
     logger.info(f"Deleting Dify conversation: {dify_conversation_id}")
 
     url = f"{config.DIFY_API_URL}/conversations/{dify_conversation_id}"
-    headers = {"Authorization": f"Bearer {config.DIFY_API_KEY}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {config.DIFY_API_KEY}",
+        "Content-Type": "application/json",
+    }
 
     try:
         with httpx.Client(timeout=HTTPX_TIMEOUT) as client:
@@ -319,5 +363,8 @@ def delete_dify_conversation(dify_conversation_id: str):
             logger.info(f"Successfully deleted Dify conversation: {dify_conversation_id}")
             return {"status": "success", "conversation_id": dify_conversation_id}
     except Exception as e:
-        logger.error(f"Failed to delete Dify conversation {dify_conversation_id}: {e}", exc_info=True)
+        logger.error(
+            f"Failed to delete Dify conversation {dify_conversation_id}: {e}",
+            exc_info=True,
+        )
         raise e from e
