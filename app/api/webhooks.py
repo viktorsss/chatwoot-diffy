@@ -4,12 +4,23 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, FastAPI, HTTPException, Request
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from .. import tasks
-from ..config import BOT_ERROR_MESSAGE
+from ..config import (
+    BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
+    BOT_ERROR_MESSAGE_INTERNAL,
+)
 from ..database import get_db
 from ..models.database import ChatwootWebhook, Dialogue, DialogueCreate
 from ..models.non_database import ConversationPriority, ConversationStatus
@@ -75,7 +86,11 @@ async def send_chatwoot_message(
 
 
 @router.post("/chatwoot-webhook")
-async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+async def chatwoot_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
     print("Received Chatwoot webhook request")
     payload = await request.json()
     webhook_data = ChatwootWebhook.model_validate(payload)
@@ -85,7 +100,10 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
 
     if webhook_data.event == "message_created":
         logger.info(f"Webhook data: {webhook_data}")
-        if webhook_data.sender_type in ["agent_bot", "????"]:  # бот не реагирует на свои мессаги
+        if webhook_data.sender_type in [
+            "agent_bot",
+            "????",
+        ]:  # бот не реагирует на свои мессаги
             logger.info(f"Skipping agent_bot message: {webhook_data.content}")
             return {"status": "skipped", "reason": "agent_bot message"}
         # conversation_is_open = webhook_data.status == "open"
@@ -93,7 +111,9 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
         # if not webhook_data.message:
         #     logger.info(f"Skipping message with empty content: {webhook_data}")
         #     return {"status": "skipped", "reason": "empty message"}
-        if str(webhook_data.content).startswith(BOT_ERROR_MESSAGE):
+        if str(webhook_data.content).startswith(BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL) or str(
+            webhook_data.content
+        ).startswith(BOT_ERROR_MESSAGE_INTERNAL):
             logger.info(f"Skipping agent_bot message: {webhook_data.content}")
             return {"status": "skipped", "reason": "agent_bot message"}
 
@@ -130,7 +150,7 @@ async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks, 
                 if webhook_data.conversation_id is not None:
                     await send_chatwoot_message(
                         conversation_id=webhook_data.conversation_id,
-                        message=BOT_ERROR_MESSAGE,
+                        message=BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
                         is_private=False,
                         db=db,
                     )
@@ -265,7 +285,11 @@ async def toggle_conversation_priority(
     try:
         priority_value = priority.value
         if not priority_value or priority_value.lower() == "none":
-            return {"status": "success", "conversation_id": conversation_id, "priority": "None"}
+            return {
+                "status": "success",
+                "conversation_id": conversation_id,
+                "priority": "None",
+            }
         logger.info(f"Attempting to set priority {priority_value} for conversation {conversation_id}")
         result = await chatwoot.toggle_priority(conversation_id=conversation_id, priority=str(priority_value))
         return {
@@ -278,7 +302,11 @@ async def toggle_conversation_priority(
         logger.exception(f"Detailed error when toggling priority for conversation {conversation_id}:")
         raise HTTPException(
             status_code=500,
-            detail={"error": str(e), "conversation_id": conversation_id, "attempted_priority": str(priority_value)},
+            detail={
+                "error": str(e),
+                "conversation_id": conversation_id,
+                "attempted_priority": str(priority_value),
+            },
         ) from e
 
 
@@ -292,7 +320,10 @@ async def get_chatwoot_conversation_id(dify_conversation_id: str, db: AsyncSessi
     dialogue = dialogue.scalar_one_or_none()
 
     if not dialogue:
-        raise HTTPException(status_code=404, detail=f"No conversation found with Dify ID: {dify_conversation_id}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No conversation found with Dify ID: {dify_conversation_id}",
+        )
 
     return {
         "chatwoot_conversation_id": dialogue.chatwoot_conversation_id,
@@ -315,7 +346,8 @@ async def get_dialogue_info(chatwoot_conversation_id: int, db: AsyncSession = De
     if not dialogue:
         logger.warning(f"Dialogue not found for Chatwoot convo ID: {chatwoot_conversation_id}")
         raise HTTPException(
-            status_code=404, detail=f"Dialogue not found for Chatwoot conversation ID {chatwoot_conversation_id}"
+            status_code=404,
+            detail=f"Dialogue not found for Chatwoot conversation ID {chatwoot_conversation_id}",
         )
 
     logger.debug(
@@ -415,7 +447,8 @@ async def assign_conversation_to_team(
 
             if team_id is None:
                 raise HTTPException(
-                    status_code=404, detail=f"Team '{team}' not found. Available teams: {list(team_cache.keys())}"
+                    status_code=404,
+                    detail=f"Team '{team}' not found. Available teams: {list(team_cache.keys())}",
                 )
 
         # Assign the conversation to the team
@@ -466,7 +499,23 @@ async def toggle_conversation_status(
         }
     """
     try:
-        result = await chatwoot.toggle_status(conversation_id=conversation_id, status=status.value)
+        # Get current conversation data to find out the previous status
+        previous_status_val: Optional[str] = None
+        try:
+            conversation_data = await chatwoot.get_conversation_data(conversation_id)
+            previous_status_val = conversation_data.get("status")
+            logger.info(f"Current status for convo {conversation_id} before toggle: {previous_status_val}")
+        except Exception as e_get_status:
+            # Log the error but proceed, previous_status will be None
+            # The notification logic in toggle_status handles previous_status being None
+            logger.warning(f"Could not fetch current status for convo {conversation_id} before toggle: {e_get_status}")
+
+        result = await chatwoot.toggle_status(
+            conversation_id=conversation_id,
+            status=status.value,
+            previous_status=previous_status_val,
+            is_error_transition=False,  # This is not an error-induced transition
+        )
         return {
             "status": "success",
             "conversation_id": conversation_id,

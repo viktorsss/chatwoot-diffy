@@ -2,16 +2,15 @@ import os
 import sys
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
+from app.config import DB_PORT, DEBUG, POSTGRES_DB, POSTGRES_PASSWORD, POSTGRES_USER
 from app.models.database import SQLModel
-from app.config import DEBUG, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, DB_PORT
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -81,9 +80,7 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()
