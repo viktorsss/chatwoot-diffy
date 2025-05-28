@@ -21,7 +21,7 @@ from ..config import (
     BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
     BOT_ERROR_MESSAGE_INTERNAL,
 )
-from ..database import get_db
+from ..database import create_db_tables, get_db
 from ..models.database import ChatwootWebhook, Dialogue, DialogueCreate
 from ..models.non_database import ConversationPriority, ConversationStatus
 from .chatwoot import ChatwootHandler
@@ -532,12 +532,16 @@ async def toggle_conversation_status(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan events manager"""
-    # Startup
-    try:
-        await update_team_cache()
-        logger.info(f"Initialized team cache with {len(team_cache)} teams")
-    except Exception as e:
-        logger.error(f"Failed to initialize team cache: {e}", exc_info=True)
-    yield
-    # Shutdown
-    pass
+    # Application startup
+    await create_db_tables()
+    logger.info("Application startup: Database tables checked/created.")
+    # Consider any other startup logic here, e.g., initializing caches, connecting to external services
+
+    await update_team_cache()
+    logger.info(f"Initialized team cache with {len(team_cache)} teams")
+
+    yield  # Application is now running
+
+    # Application shutdown
+    # Consider any cleanup logic here, e.g., closing connections, saving state
+    logger.info("Application shutdown: Cleaning up resources.")

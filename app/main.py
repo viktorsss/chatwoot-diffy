@@ -8,7 +8,7 @@ from sentry_sdk.integrations.starlette import StarletteIntegration
 
 from .api import health, webhooks
 from .api.webhooks import lifespan
-from .database import async_engine, create_db_tables
+from .database import async_engine
 from .telemetry import setup_telemetry
 from .utils.sentry import init_sentry
 
@@ -40,13 +40,6 @@ if sentry_initialized:
 
 app = FastAPI(title="Chatwoot AI Handler", lifespan=lifespan, debug=os.getenv("DEBUG", "False") == "True")
 setup_telemetry(app, async_engine)
-
-
-# Initialize database tables asynchronously
-@app.on_event("startup")
-async def startup_db_client():
-    await create_db_tables()
-
 
 app.include_router(webhooks.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1/health")
