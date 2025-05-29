@@ -45,3 +45,46 @@ https://<ссылка на bridge>/api/v1/chatwoot-webhook`.
 # Штуки для удобства
 
 В setup_chatwoot_config.ipynb живёт пример как удобно по api залить команды и csutom attributes. Важно : нужны админ права для апи (в super admin console в чатвуте берётся ключ)
+
+# Chatdify
+
+A Python connector for integrating Chatwoot with Dify AI
+
+## Monitoring & Error Tracking
+
+This application uses **Sentry** for comprehensive error tracking, performance monitoring, and observability. The setup includes:
+
+### Sentry Integrations
+
+- **FastAPI Integration**: Captures HTTP errors, request data, middleware events, and performance traces
+- **Starlette Integration**: Provides additional middleware and routing instrumentation
+- **Celery Integration**: Monitors background task execution, errors, and distributed tracing
+- **HTTPX Integration**: Instruments outgoing HTTP requests for tracing external API calls
+- **SQLAlchemy Integration**: Captures SQL queries as breadcrumbs and spans for database monitoring
+- **AsyncPG Integration**: Database connection monitoring for PostgreSQL
+- **Logging Integration**: Captures logs as breadcrumbs and sends error-level logs as events
+
+### Configuration
+
+Configure Sentry via environment variables:
+
+```bash
+SENTRY_DSN=your_sentry_dsn_here
+SENTRY_ENVIRONMENT=production
+SENTRY_TRACES_SAMPLE_RATE=0.1
+SENTRY_PROFILES_SAMPLE_RATE=0.1
+SENTRY_LOG_LEVEL=WARNING
+SENTRY_ATTACH_STACKTRACE=True
+SENTRY_SEND_DEFAULT_PII=False
+```
+
+### Features
+
+- **Error Tracking**: Automatic capture of exceptions with full context
+- **Performance Monitoring**: Transaction traces for HTTP requests and database queries
+- **Breadcrumbs**: Contextual logs and events leading up to errors
+- **Profiling**: Code-level performance insights during traces
+- **Distributed Tracing**: End-to-end request tracking across services
+- **Release Tracking**: Version-aware error reporting and deployments
+
+For more details, see the [Sentry documentation](https://docs.sentry.io/platforms/python/).

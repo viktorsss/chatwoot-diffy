@@ -11,7 +11,6 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - OTEL_SERVICE_NAME=chatwoot-dify-web
       - DEBUG=False  # Force this to be False
       - DB_HOST=db   # Force the host
       - DB_PORT=5432 # Force the port
@@ -36,7 +35,6 @@ services:
     volumes:
       - .:/app
     environment:
-      - OTEL_SERVICE_NAME=chatwoot-dify-worker
       - DEBUG=False  # Force this to be False
       - DB_HOST=db   # Force the host
       - DB_PORT=5432 # Force the port
@@ -69,15 +67,6 @@ services:
       retries: 5
     ports:
       - "6380:6379"
-
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    ports:
-      - "16686:16686"  # UI
-      - "4317:4317"    # OTLP gRPC
-      - "4318:4318"    # OTLP HTTP
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
 
 volumes:
   postgres_data:

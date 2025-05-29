@@ -53,12 +53,6 @@ CHATWOOT_ADMIN_API_KEY = os.getenv("CHATWOOT_ADMIN_API_KEY", "")
 CHATWOOT_ACCOUNT_ID = os.getenv("CHATWOOT_ACCOUNT_ID", "1")
 ALLOWED_CONVERSATION_STATUSES = os.getenv("ALLOWED_CONVERSATION_STATUSES", "open,pending").split(",")
 
-# OpenTelemetry configuration
-OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger:4317")
-OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "chatwoot-dify")
-OTEL_EXPORTER_OTLP_PROTOCOL = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
-OTEL_PYTHON_EXCLUDED_URLS = os.getenv("OTEL_PYTHON_EXCLUDED_URLS", "healthcheck,metrics")
-
 # SQLAlchemy engine configuration
 DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "10"))
 DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "20"))

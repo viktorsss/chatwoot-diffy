@@ -53,15 +53,27 @@ celery.config_from_object(config, namespace="CELERY")
 # Initialize Sentry on Celery daemon startup
 @signals.celeryd_init.connect
 def init_sentry_for_celery(**_kwargs):
-    if init_sentry(with_fastapi=False, with_asyncpg=False, with_celery=True):
-        logger.info("Celery daemon: Sentry initialized via celeryd_init signal")
+    if init_sentry(
+        with_fastapi=False, 
+        with_asyncpg=False, 
+        with_celery=True, 
+        with_httpx=True, 
+        with_sqlalchemy=True
+    ):
+        logger.info("Celery daemon: Sentry initialized with Celery, HTTPX, and SQLAlchemy integrations")
 
 
 # Initialize Sentry on each worker process startup
 @signals.worker_init.connect
 def init_sentry_for_worker(**_kwargs):
-    if init_sentry(with_fastapi=False, with_asyncpg=False, with_celery=True):
-        logger.info("Celery worker: Sentry initialized via worker_init signal")
+    if init_sentry(
+        with_fastapi=False, 
+        with_asyncpg=False, 
+        with_celery=True, 
+        with_httpx=True, 
+        with_sqlalchemy=True
+    ):
+        logger.info("Celery worker: Sentry initialized with Celery, HTTPX, and SQLAlchemy integrations")
 
 
 def make_dify_request(url: str, data: dict, headers: dict) -> dict:
