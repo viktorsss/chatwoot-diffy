@@ -5,12 +5,12 @@ import httpx
 from celery import Celery, signals
 from dotenv import load_dotenv
 
-from . import config
-from .api.chatwoot import ChatwootHandler
-from .config import BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL, BOT_ERROR_MESSAGE_INTERNAL
-from .database import SessionLocal
-from .models.database import Dialogue, DifyResponse
-from .utils.sentry import init_sentry
+from app import config
+from app.api.chatwoot import ChatwootHandler
+from app.config import BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL, BOT_ERROR_MESSAGE_INTERNAL
+from app.database import SessionLocal
+from app.models.database import Dialogue, DifyResponse
+from app.utils.sentry import init_sentry
 
 load_dotenv()
 

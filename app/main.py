@@ -3,9 +3,9 @@ import os
 
 from fastapi import FastAPI
 
-from .api import health, webhooks
-from .api.webhooks import lifespan
-from .utils.sentry import init_sentry
+from app.api import health, webhooks
+from app.api.webhooks import lifespan
+from app.utils.sentry import init_sentry
 
 # Add before creating FastAPI app
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")

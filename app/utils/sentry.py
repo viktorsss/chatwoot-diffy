@@ -9,7 +9,7 @@ from sentry_sdk.integrations.logging import LoggingIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
-from ..config import (
+from app.config import (
     DEBUG,
     SENTRY_ATTACH_STACKTRACE,
     SENTRY_DSN,

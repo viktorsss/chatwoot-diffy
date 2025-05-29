@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from .. import config
+from app import config
 
 logger = logging.getLogger(__name__)
 

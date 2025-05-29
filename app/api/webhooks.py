@@ -16,15 +16,15 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from .. import tasks
-from ..config import (
+from app import tasks
+from app.api.chatwoot import ChatwootHandler
+from app.config import (
     BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
     BOT_ERROR_MESSAGE_INTERNAL,
 )
-from ..database import create_db_tables, get_db
-from ..models.database import ChatwootWebhook, Dialogue, DialogueCreate
-from ..models.non_database import ConversationPriority, ConversationStatus
-from .chatwoot import ChatwootHandler
+from app.database import create_db_tables, get_db
+from app.models.database import ChatwootWebhook, Dialogue, DialogueCreate
+from app.models.non_database import ConversationPriority, ConversationStatus
 
 logger = logging.getLogger(__name__)
 
