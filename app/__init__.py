@@ -1,1 +1,1 @@
-"""Chatwoot-Dify connector application package.""" 
+"""Chatdify connector application package.""" 

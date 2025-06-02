@@ -10,7 +10,6 @@ from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
 from app.config import (
-    DEBUG,
     SENTRY_ATTACH_STACKTRACE,
     SENTRY_DSN,
     SENTRY_ENVIRONMENT,
@@ -100,7 +99,6 @@ def init_sentry(
         profile_lifecycle="trace",  # Enable profiling during traces
         integrations=integrations,
         enable_tracing=True,
-        debug=DEBUG == "True",
         attach_stacktrace=SENTRY_ATTACH_STACKTRACE,
         send_default_pii=SENTRY_SEND_DEFAULT_PII,
         in_app_include=["app"],

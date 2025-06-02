@@ -1,49 +1,52 @@
-version: '3.12'
+x-postgres-credentials: &postgres_credentials
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+  POSTGRES_DB: ${POSTGRES_DB:-chatdify}
 
-services:
-  web:
+x-app-common: &app_common
     build: .
-    command: >
-      sh -c "alembic upgrade head &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
-    volumes:
-      - .:/app
-    ports:
-      - "8000:8000"
-    environment:
-      - DEBUG=False  # Force this to be False
-      - DB_HOST=db   # Force the host
-      - DB_PORT=5432 # Force the port
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      celery_worker:
-        condition: service_started
     env_file:
       - .env
+    environment:
+      <<: *postgres_credentials
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
+
+services:
+  migrate:
+    <<: *app_common
+    command: alembic upgrade head
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app_common
+    command: fastapi run --host 0.0.0.0 --port 8000
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      worker:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 1200s
       timeout: 5s
       retries: 5
 
-  celery_worker:
-    build: .
+  worker:
+    <<: *app_common
     command: celery -A app.tasks worker --loglevel=info --concurrency=4 --pool=prefork
-    volumes:
-      - .:/app
-    environment:
-      - DEBUG=False  # Force this to be False
-      - DB_HOST=db   # Force the host
-      - DB_PORT=5432 # Force the port
     depends_on:
-      - redis
-    env_file:
-      - .env
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
-  db:
+  postgres:
     image: postgres:16
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
@@ -52,21 +55,23 @@ services:
       retries: 5
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    env_file:
-      - .env
+    environment:
+      <<: *postgres_credentials
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
 
   redis:
-    container_name: chatwoot_dify_redis
     image: redis:6-alpine
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
+    volumes:
+      - redis_data:/data
     ports:
-      - "6380:6379"
+      - "127.0.0.1:6380:6379"
 
 volumes:
   postgres_data:
+  redis_data:

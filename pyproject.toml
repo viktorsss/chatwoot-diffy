@@ -4,16 +4,16 @@ version = "0.0.1.beta.1"
 description = "A Python connector for integrating Chatwoot with Dify AI"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi[standard]==0.115.8",
-    "sqlmodel==0.0.22",
-    "httpx==0.28.1",
-    "psycopg2-binary==2.9.10",
-    "python-dotenv==1.0.1",
-    "celery==5.4.0",
-    "redis==5.2.1",
-    "alembic==1.14.1",
-    "asyncpg==0.30.0",
-    "sentry-sdk[fastapi,celery,sqlalchemy,httpx]==2.24.0",
+    "fastapi[standard]>=0.115.8",
+    "sqlmodel>=0.0.22",
+    "httpx>=0.28.1",
+    "psycopg2-binary>=2.9.10",
+    "python-dotenv>=1.0.1",
+    "celery>=5.4.0",
+    "redis>=5.2.1",
+    "alembic>=1.16.0",
+    "asyncpg>=0.30.0",
+    "sentry-sdk[fastapi,celery,sqlalchemy,httpx]>=2.24.0",
 ]
 
 [dependency-groups]
@@ -60,32 +60,4 @@ asyncio_mode = "auto"
 env_files = [".env"]
 
 [tool.alembic]
-script_location = "alembic"
-sqlalchemy.url = "driver://user:pass@localhost/dbname"
-file_template = "%%(year)d_%%(month).2d_%%(day).2d_%%(hour).2d%%(minute).2d-%%(rev)s_%%(slug)s"
-
-# Logging configuration
-[tool.alembic.logger_root]
-level = "WARN"
-handlers = "console"
-qualname = ""
-
-[tool.alembic.logger_sqlalchemy]
-level = "WARN"
-handlers = ""
-qualname = "sqlalchemy.engine"
-
-[tool.alembic.logger_alembic]
-level = "INFO"
-handlers = ""
-qualname = "alembic"
-
-[tool.alembic.handler_console]
-class = "StreamHandler"
-args = "(sys.stdout,)"
-level = "NOTSET"
-formatter = "generic"
-
-[tool.alembic.formatter_generic]
-format = "%(levelname)-5.5s [%(name)s] %(message)s"
-datefmt = "%H:%M:%S"
+script_location = "%(here)s/alembic"

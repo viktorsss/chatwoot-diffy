@@ -1,6 +1,6 @@
+import logging
 import os
 import sys
-from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
@@ -9,35 +9,45 @@ from alembic import context
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from app.config import DB_PORT, DEBUG, POSTGRES_DB, POSTGRES_PASSWORD, POSTGRES_USER
+from app.config import DB_HOST, DB_PORT, POSTGRES_DB, POSTGRES_PASSWORD, POSTGRES_USER
 from app.models.database import SQLModel
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
+# Configure alembic settings directly in env.py
 config = context.config
 
-# Use localhost for local migrations, db for Docker
-db_host = "localhost" if DEBUG == "True" else "db"
-DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{db_host}:{DB_PORT}/{POSTGRES_DB}"
+# Configure logging manually instead of using external config
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)-5.5s [%(name)s] %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+
+# Set alembic logger to INFO level
+logging.getLogger('alembic').setLevel(logging.INFO)
+
+# Set sqlalchemy engine logger to WARN level
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARN)
+
+# Set root logger to WARN level
+logging.getLogger().setLevel(logging.WARN)
+
+# Configure alembic settings
+config.set_main_option("script_location", "alembic")
+config.set_main_option("prepend_sys_path", ".")
+config.set_main_option("version_path_separator", "os")
+
+# File template for migration files
+file_template = "%%(year)d_%%(month).2d_%%(day).2d_%%(hour).2d%%(minute).2d-%%(rev)s_%%(slug)s"
+config.set_main_option("file_template", file_template)
+
+
+DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}"
 
 # Override sqlalchemy.url with our DATABASE_URL
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
-
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
+# Add your model's MetaData object here for 'autogenerate' support
 target_metadata = SQLModel.metadata
-
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
 
 
 def run_migrations_offline() -> None:
