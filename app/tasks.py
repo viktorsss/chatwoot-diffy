@@ -5,12 +5,12 @@ import httpx
 from celery import Celery, signals
 from dotenv import load_dotenv
 
-from . import config
-from .api.chatwoot import ChatwootHandler
-from .config import BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL, BOT_ERROR_MESSAGE_INTERNAL
-from .database import SessionLocal
-from .models.database import Dialogue, DifyResponse
-from .utils.sentry import init_sentry
+from app import config
+from app.api.chatwoot import ChatwootHandler
+from app.config import BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL, BOT_ERROR_MESSAGE_INTERNAL
+from app.database import SessionLocal
+from app.models.database import Dialogue, DifyResponse
+from app.utils.sentry import init_sentry
 
 load_dotenv()
 
@@ -53,15 +53,15 @@ celery.config_from_object(config, namespace="CELERY")
 # Initialize Sentry on Celery daemon startup
 @signals.celeryd_init.connect
 def init_sentry_for_celery(**_kwargs):
-    if init_sentry(with_fastapi=False, with_asyncpg=False, with_celery=True):
-        logger.info("Celery daemon: Sentry initialized via celeryd_init signal")
+    if init_sentry(with_fastapi=False, with_asyncpg=False, with_celery=True, with_httpx=True, with_sqlalchemy=True):
+        logger.info("Celery daemon: Sentry initialized with Celery, HTTPX, and SQLAlchemy integrations")
 
 
 # Initialize Sentry on each worker process startup
 @signals.worker_init.connect
 def init_sentry_for_worker(**_kwargs):
-    if init_sentry(with_fastapi=False, with_asyncpg=False, with_celery=True):
-        logger.info("Celery worker: Sentry initialized via worker_init signal")
+    if init_sentry(with_fastapi=False, with_asyncpg=False, with_celery=True, with_httpx=True, with_sqlalchemy=True):
+        logger.info("Celery worker: Sentry initialized with Celery, HTTPX, and SQLAlchemy integrations")
 
 
 def make_dify_request(url: str, data: dict, headers: dict) -> dict:

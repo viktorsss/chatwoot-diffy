@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from .. import config
+from app import config
 
 logger = logging.getLogger(__name__)
 
@@ -123,22 +123,17 @@ class ChatwootHandler:
             logger.error(f"Failed to assign conversation {conversation_id} to agent {assignee_id}: {e}")
             raise
 
-    async def patch_custom_attributes(self, conversation_id: int, custom_attributes: Dict[str, Any]) -> Dict[str, Any]:
-        """Update custom attributes for a conversation using PATCH method
-
-        Unlike update_custom_attributes, this method doesn't merge with existing attributes,
-        but directly patches with the provided attributes.
-        """
+    async def update_custom_attributes(self, conversation_id: int, custom_attributes: Dict[str, Any]) -> Dict[str, Any]:
+        """Update custom attributes for a conversation using the provided account_id and conversation_id."""
         custom_attrs_url = f"{self.conversations_url}/{conversation_id}/custom_attributes"
 
         try:
             async with httpx.AsyncClient() as client:
                 payload = {"custom_attributes": custom_attributes}
 
-                # Use PATCH instead of POST to update attributes
-                response = await client.patch(custom_attrs_url, json=payload, headers=self.headers)
+                # Use POST to update attributes
+                response = await client.post(custom_attrs_url, json=payload, headers=self.headers)
                 response.raise_for_status()
-                # Check if response has content before trying to parse as JSON
                 if response.content and len(response.content.strip()) > 0:
                     try:
                         return response.json()
@@ -147,7 +142,7 @@ class ChatwootHandler:
                         return {}
                 return {}
         except Exception as e:
-            logger.error(f"Failed to patch custom attributes for convo {conversation_id}: {e}")
+            logger.error(f"Failed to update custom attributes for conversation {conversation_id}: {e}")
             raise
 
     async def toggle_priority(self, conversation_id: int, priority: str) -> Dict[str, Any]:

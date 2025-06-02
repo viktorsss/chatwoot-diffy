@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
 from sqlmodel import Session
 
-from ..api.chatwoot import ChatwootHandler
-from ..database import async_engine, get_db
+from app.api.chatwoot import ChatwootHandler
+from app.database import async_engine, get_db
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

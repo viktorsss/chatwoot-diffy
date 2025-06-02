@@ -6,16 +6,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Core application settings
-DEBUG = os.getenv("DEBUG", "False")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api/v1")
 
 # Database configuration
-DB_HOST = "localhost" if DEBUG == "True" else os.getenv("DB_HOST", "db")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "user")
+DB_HOST = os.getenv("DB_HOST", "postgres")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "password")
-DB_PORT = "5433" if DEBUG == "True" else "5432"
-POSTGRES_DB = os.getenv("POSTGRES_DB", "chatwoot_dify")
+DB_PORT = os.getenv("DB_PORT", "5432")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "chatdify")
 
 # Connection strings
 DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}"
@@ -26,14 +25,25 @@ REDIS_PORT = os.getenv("REDIS_PORT", "6380")
 REDIS_BROKER = os.getenv("REDIS_BROKER", f"redis://{REDIS_HOST}:{REDIS_PORT}/0")
 REDIS_BACKEND = os.getenv("REDIS_BACKEND", f"redis://{REDIS_HOST}:{REDIS_PORT}/1")
 
-# Celery configuration
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_BROKER)
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_BACKEND)
-CELERY_WORKER_CONCURRENCY = int(os.getenv("CELERY_WORKER_CONCURRENCY", "4"))
-CELERY_TASK_TIME_LIMIT = int(os.getenv("CELERY_TASK_TIME_LIMIT", "300"))
-CELERY_TASK_SOFT_TIME_LIMIT = int(os.getenv("CELERY_TASK_SOFT_TIME_LIMIT", "240"))
-CELERY_TASK_MAX_TASKS_PER_CHILD = int(os.getenv("CELERY_TASK_MAX_TASKS_PER_CHILD", "100"))
-CELERY_WORKER_PREFETCH_MULTIPLIER = int(os.getenv("CELERY_WORKER_PREFETCH_MULTIPLIER", "1"))
+# Celery configuration - using modern naming conventions for Celery 5.x+
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_BROKER)  # Keep for backwards compatibility
+# Note: CELERY_RESULT_BACKEND is deprecated, now using result_backend below
+
+# New Celery settings (lowercase without CELERY_ prefix for use with namespace="CELERY")
+# These are the modern Celery 5.x+ configuration names
+broker_url = os.getenv("CELERY_BROKER_URL", REDIS_BROKER)
+result_backend = os.getenv("CELERY_RESULT_BACKEND", REDIS_BACKEND)
+worker_concurrency = int(os.getenv("CELERY_WORKER_CONCURRENCY", "4"))
+task_time_limit = int(os.getenv("CELERY_TASK_TIME_LIMIT", "300"))
+task_soft_time_limit = int(os.getenv("CELERY_TASK_SOFT_TIME_LIMIT", "240"))
+task_max_retries = int(os.getenv("CELERY_TASK_MAX_RETRIES", "3"))
+worker_max_tasks_per_child = int(os.getenv("CELERY_TASK_MAX_TASKS_PER_CHILD", "100"))
+worker_prefetch_multiplier = int(os.getenv("CELERY_WORKER_PREFETCH_MULTIPLIER", "1"))
+
+# Celery 6.0 compatibility settings
+broker_connection_retry_on_startup = True  # Retain current behavior for connection retries
+
+# Custom settings for our application
 CELERY_RETRY_COUNTDOWN = int(os.getenv("CELERY_RETRY_COUNTDOWN", "5"))
 
 # Dify.ai configuration
@@ -53,11 +63,9 @@ CHATWOOT_ADMIN_API_KEY = os.getenv("CHATWOOT_ADMIN_API_KEY", "")
 CHATWOOT_ACCOUNT_ID = os.getenv("CHATWOOT_ACCOUNT_ID", "1")
 ALLOWED_CONVERSATION_STATUSES = os.getenv("ALLOWED_CONVERSATION_STATUSES", "open,pending").split(",")
 
-# OpenTelemetry configuration
-OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger:4317")
-OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "chatwoot-dify")
-OTEL_EXPORTER_OTLP_PROTOCOL = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
-OTEL_PYTHON_EXCLUDED_URLS = os.getenv("OTEL_PYTHON_EXCLUDED_URLS", "healthcheck,metrics")
+# Team cache configuration - disabled by default for better API reliability
+ENABLE_TEAM_CACHE = os.getenv("ENABLE_TEAM_CACHE", "False").lower() in ("true", "1", "t")
+TEAM_CACHE_TTL_HOURS = int(os.getenv("TEAM_CACHE_TTL_HOURS", "24"))  # Cache for 24 hours by default
 
 # SQLAlchemy engine configuration
 DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "10"))
@@ -96,12 +104,12 @@ SENTRY_SEND_DEFAULT_PII = os.getenv("SENTRY_SEND_DEFAULT_PII", "False").lower() 
 
 BOT_ERROR_MESSAGE_INTERNAL = os.getenv(
     "BOT_ERROR_MESSAGE_INTERNAL",
-    "Бот неожиданно сломался, диалог переведён в открытые",
+    "Bot unexpectedly broke down, conversation moved to open status",
 )
 
 BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL = os.getenv(
     "BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL",
-    "Ваш диалог переведён к операторам. Не переживайте, с вами свяжутся!",
+    "Your conversation has been transferred to operators. Don't worry, they will contact you!",
 )
 
 

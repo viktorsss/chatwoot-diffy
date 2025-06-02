@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import QueuePool
 from sqlmodel import Session, SQLModel, create_engine
 
-from . import config
+from app import config
 
 # Synchronous engine for Celery tasks and migrations
 sync_engine = create_engine(

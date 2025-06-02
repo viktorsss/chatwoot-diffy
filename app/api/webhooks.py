@@ -16,24 +16,26 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from .. import tasks
-from ..config import (
+from app import tasks
+from app.api.chatwoot import ChatwootHandler
+from app.config import (
     BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
     BOT_ERROR_MESSAGE_INTERNAL,
+    ENABLE_TEAM_CACHE,
+    TEAM_CACHE_TTL_HOURS,
 )
-from ..database import get_db
-from ..models.database import ChatwootWebhook, Dialogue, DialogueCreate
-from ..models.non_database import ConversationPriority, ConversationStatus
-from .chatwoot import ChatwootHandler
+from app.database import create_db_tables, get_db
+from app.models.database import ChatwootWebhook, Dialogue, DialogueCreate
+from app.models.non_database import ConversationPriority, ConversationStatus
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 chatwoot = ChatwootHandler()
 
-# Team management
-team_cache: Dict[str, int] = {}
-team_cache_lock = asyncio.Lock()
+# Team management - only initialize if caching is enabled
+team_cache: Dict[str, int] = {} if ENABLE_TEAM_CACHE else {}
+team_cache_lock = asyncio.Lock() if ENABLE_TEAM_CACHE else None
 last_update_time = 0
 
 
@@ -237,7 +239,7 @@ async def update_custom_attributes(
             "custom_attributes": "No custom attrs provided",
         }
     try:
-        result = await chatwoot.patch_custom_attributes(
+        result = await chatwoot.update_custom_attributes(
             conversation_id=conversation_id, custom_attributes=custom_attributes
         )
         logger.info(f"Updated custom attributes for conversation {conversation_id}: {result}")
@@ -364,6 +366,10 @@ async def get_dialogue_info(chatwoot_conversation_id: int, db: AsyncSession = De
 
 async def update_team_cache():
     """Update the team name to ID mapping cache."""
+    if not ENABLE_TEAM_CACHE:
+        logger.warning("Team caching is disabled. Skipping cache update.")
+        return {}
+
     global team_cache, last_update_time
 
     async with team_cache_lock:
@@ -393,7 +399,19 @@ async def get_team_id(team_name: str) -> Optional[int]:
     Returns:
         The team ID or None if not found
     """
-    if not team_cache or (datetime.utcnow().timestamp() - last_update_time) > 24 * 3600:  # Cache for 24 hour
+    if not ENABLE_TEAM_CACHE:
+        # Direct API call when caching is disabled
+        try:
+            teams = await chatwoot.get_teams()
+            team_map = {team["name"].lower(): team["id"] for team in teams}
+            return team_map.get(team_name.lower())
+        except Exception as e:
+            logger.error(f"Failed to get team ID for '{team_name}' (no cache): {e}")
+            return None
+
+    # Use cache when enabled
+    cache_age_hours = (datetime.now(datetime.UTC).timestamp() - last_update_time) / 3600
+    if not team_cache or cache_age_hours > TEAM_CACHE_TTL_HOURS:
         await update_team_cache()
 
     return team_cache.get(team_name.lower())
@@ -402,9 +420,17 @@ async def get_team_id(team_name: str) -> Optional[int]:
 @router.post("/refresh-teams")
 async def refresh_teams_cache():
     """Manually refresh the team cache."""
+    if not ENABLE_TEAM_CACHE:
+        # When caching is disabled, just return current teams from API
+        try:
+            teams = await chatwoot.get_teams()
+            return {"status": "success", "teams": len(teams), "cache_enabled": False}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to fetch teams: {str(e)}") from e
+
     try:
         teams = await update_team_cache()
-        return {"status": "success", "teams": len(teams)}
+        return {"status": "success", "teams": len(teams), "cache_enabled": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to refresh teams: {str(e)}") from e
 
@@ -441,14 +467,25 @@ async def assign_conversation_to_team(
         team_id = await get_team_id(team)
 
         if team_id is None:
-            # Try to refresh the cache and try again
-            await update_team_cache()
-            team_id = await get_team_id(team)
+            if ENABLE_TEAM_CACHE:
+                # Try to refresh the cache and try again
+                await update_team_cache()
+                team_id = await get_team_id(team)
 
             if team_id is None:
+                # Get available teams for error message
+                try:
+                    if ENABLE_TEAM_CACHE:
+                        available_teams = list(team_cache.keys())
+                    else:
+                        teams = await chatwoot.get_teams()
+                        available_teams = [team["name"].lower() for team in teams]
+                except Exception:
+                    available_teams = ["Unable to fetch teams"]
+
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Team '{team}' not found. Available teams: {list(team_cache.keys())}",
+                    detail=f"Team '{team}' not found. Available teams: {available_teams}",
                 )
 
         # Assign the conversation to the team
@@ -469,13 +506,25 @@ async def assign_conversation_to_team(
     except Exception as e:
         # Log the full exception details
         logger.exception(f"Detailed error when assigning team for conversation {conversation_id}:")
+
+        # Get available teams for error details
+        try:
+            if ENABLE_TEAM_CACHE:
+                available_teams = list(team_cache.keys())
+            else:
+                teams = await chatwoot.get_teams()
+                available_teams = [team["name"].lower() for team in teams]
+        except Exception:
+            available_teams = ["Unable to fetch teams"]
+
         raise HTTPException(
             status_code=500,
             detail={
                 "error": str(e),
                 "conversation_id": conversation_id,
                 "attempted_team": team,
-                "available_teams": list(team_cache.keys()),
+                "available_teams": available_teams,
+                "cache_enabled": ENABLE_TEAM_CACHE,
             },
         ) from e
 
@@ -532,12 +581,19 @@ async def toggle_conversation_status(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan events manager"""
-    # Startup
-    try:
+    # Application startup
+    await create_db_tables()
+    logger.info("Application startup: Database tables checked/created.")
+    # Consider any other startup logic here, e.g., initializing caches, connecting to external services
+
+    if ENABLE_TEAM_CACHE:
         await update_team_cache()
         logger.info(f"Initialized team cache with {len(team_cache)} teams")
-    except Exception as e:
-        logger.error(f"Failed to initialize team cache: {e}", exc_info=True)
-    yield
-    # Shutdown
-    pass
+    else:
+        logger.info("Team caching is disabled. Teams will be fetched directly from API.")
+
+    yield  # Application is now running
+
+    # Application shutdown
+    # Consider any cleanup logic here, e.g., closing connections, saving state
+    logger.info("Application shutdown: Cleaning up resources.")

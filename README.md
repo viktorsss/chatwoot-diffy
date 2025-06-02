@@ -1,47 +1,85 @@
-# Что это?
-Коннектор, который запускает свои постгрю, редис, celery workers, фастапи сервер и телеметрию. Следит за всеми событиями в чатвуте и на нужные из них дёргает пайплайны в dify, выступая мостом между ними.
+# Chatdify: Chatwoot-Dify AI Connector
 
-# Как это должно работать
-- Слушаем все эвенты от чатвута, через ифы в зависимости от статуса диалога / автора сообщения решаем, что пропускать.
-- Dify пайплайны триггерим ТОЛЬКО пока диалог в статусе pending.
-- Тыкание эндпойнтов по изменению статуса / региона / прочего - всё из dify, пока никаких ключей нет, пердполагается что всё живёт в одной сети, где из внешнего мира мост недоступен.
+**Chatdify** is a Python-based connector designed to integrate Chatwoot with Dify AI. It acts as a bridge, listening to events in Chatwoot and triggering Dify AI pipelines to automate and enhance customer interactions.
 
-# Чего пока нет
-- Удаление диалогов в дифи (надо решить в какой момент делать)
-- Создание своих диалогов (эндпойнты позволяют, но нужен айди контакта)
+## ⚠️ Beta Notice
 
-# Иметь в виду
+**Important:** This project is currently in **beta** and is **not recommended for production use**. Please use it at your own risk and expect potential issues or changes.
 
-После того как назначается тима бот уже не может сводобно дёргать эндпойнты с инфой о дилаоге, в том числе и custom attributes. При этом он даже может их апдейтить, но не читать.
+## Core Features
 
-При простановке всяких параметров по conversation_id счяитается, что это ответственность моста обработать "None" и им подобные значения, не делать запрос в чатвут и вернуть success статус dify-пайплайну.
+*   **Event-driven:** Listens to Chatwoot webhook events (e.g., new messages, conversation status changes).
+*   **AI Processing:** Processes incoming messages and conversation context through Dify AI pipelines.
+*   **Automated Responses:** Sends AI-generated responses back to Chatwoot conversations.
+*   **Conversation Management:** Provides API endpoints to programmatically manage Chatwoot conversation attributes (status, priority, labels, custom fields, team assignment), often triggered by Dify.
+*   **Asynchronous Operations:** Utilizes Celery for background task processing (e.g., Dify API calls).
+*   **Persistent Storage:** Uses PostgreSQL to store mappings between Chatwoot and Dify conversations.
+*   **Configurable:** Settings managed via environment variables.
 
-Dify снэпшотит `inputs` для диалога в базе : https://github.com/langgenius/dify/issues/11140 Поэтому просто передавать туда статус не выйдет, он так и останется pending.
+## How It Works
 
-# Как деплоить
+1.  Chatwoot sends webhook events (e.g., a new customer message) to Chatdify.
+2.  Chatdify identifies the event and relevant conversation data.
+3.  It triggers a pre-configured Dify AI pipeline, passing the message and context.
+4.  Dify processes the input and returns a response or performs actions.
+5.  Chatdify sends Dify's response back to the Chatwoot conversation.
+6.  Dify pipelines can also call back to Chatdify's API endpoints to update conversation details in Chatwoot (e.g., set status, assign to a team).
 
-Важно : ссылку на вебхук надо прописать для Agent Bot в Super Admin консоли chatwoot : `Outgoing url
-https://<ссылка на bridge>/api/v1/chatwoot-webhook`.
+## Getting Started
 
-Ссылка на корень сервиса должна быть в env vars пайплайна в dify `bridge_api_url = https:///<ссылка на bridge>/api/v1`
+### Prerequisites
 
-Не забыть из нужного dify пайплайна/бота взять его апи ключ и прописать в энв как `DIFY_API_KEY`, именно по этому ключу dify не только впускает, но и понимает, какой пайплайн запускать.
+*   Docker and Docker Compose
+*   `uv` (Python package manager by Astral)
 
-Чтобы подключить инбокс к боту, надо его явныс образом его туда добавить, предварительно убедившись, что в Super Admin Console проставлена галка для Agent Bots для акка.
+### Installation & Setup
 
-Админ юзер должен быть во всех тимах, чтобы для диалогов этих тим не ломался эндпойнт `get_conversation_data`
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/eremeye/chatdify
+    cd chatdify
+    ```
+
+2.  **Install dependencies:**
+    ```bash
+    uv sync
+    ```
+
+3.  **Configure your environment:**
+    Copy the example environment file and then edit `.env` to fill in your specific configurations:
+    ```bash
+    cp .env.example .env
+    nano .env  # Or your preferred editor
+    ```
+    Key environment variables to configure in `.env`:
+    *   `CHATWOOT_API_URL`: Your Chatwoot instance API URL.
+    *   `CHATWOOT_API_KEY`: API key for the Agent Bot.
+    *   `CHATWOOT_ADMIN_API_KEY`: API key with admin privileges (e.g., for managing teams, custom attributes).
+    *   `CHATWOOT_ACCOUNT_ID`: Your Chatwoot account ID.
+    *   `DIFY_API_URL`: Your Dify API URL.
+    *   `DIFY_API_KEY`: Your Dify pipeline/application API key.
+    *   Database credentials (`POSTGRES_PASSWORD`).
 
 
-Дальше `docker-compose up` должно хватить.
 
-# Как тестить
-В health.py живёт совсем базовое.
-При локальном деплое:
-1) Убедиться что заполнен .env
-2) прописать туда `TEST_CONVERSATION_ID=<айдишник дилога, видно в логах и dev tools браузера>`, написав боту со своего акка.
-3) `uv pip install -e ".[dev]"` (uv прекрасный пакетный мендежер для питона на rust : https://docs.astral.sh/uv/getting-started/installation/)
-4) `python -m pytest`
+4.  **Chatwoot Configuration:**
+    *   In your Chatwoot Super Admin console, configure an **Agent Bot**.
+    *   Set the Agent Bot's **Outgoing URL** (webhook URL) to:
+        `https://<your-chatdify-domain>/api/v1/chatwoot-webhook`
+    *   Ensure the Agent Bot is added to the inboxes you want it to interact with.
 
-# Штуки для удобства
+5.  **Dify Configuration:**
+    *   In your Dify AI application/pipeline settings, if it needs to call back to Chatdify (e.g., to update conversation status), set an environment variable or parameter like `bridge_api_url` to:
+        `https://<your-chatdify-domain>/api/v1`
 
-В setup_chatwoot_config.ipynb живёт пример как удобно по api залить команды и csutom attributes. Важно : нужны админ права для апи (в super admin console в чатвуте берётся ключ)
+6.  **Run the application with Docker:**
+    ```bash
+    docker-compose up -d
+    ```
+    (Use `docker-compose up` without `-d` to see logs in the foreground).
+
+
+## Utility Scripts
+
+The `notebooks/setup_chatwoot_config.ipynb` Jupyter notebook provides an example of how to programmatically set up Chatwoot custom attributes and commands using the API. This requires admin privileges for your Chatwoot API key.
+
