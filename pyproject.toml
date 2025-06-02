@@ -11,7 +11,6 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "celery>=5.4.0",
     "redis>=5.2.1",
-    "alembic>=1.16.0",
     "asyncpg>=0.30.0",
     "sentry-sdk[fastapi,celery,sqlalchemy,httpx]>=2.24.0",
 ]
@@ -27,7 +26,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["app", "alembic"]
+packages = ["app"]
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -58,6 +57,3 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 asyncio_mode = "auto"
 env_files = [".env"]
-
-[tool.alembic]
-script_location = "%(here)s/alembic"
