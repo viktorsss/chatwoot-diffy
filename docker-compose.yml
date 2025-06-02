@@ -25,6 +25,8 @@ services:
         condition: service_healthy
       worker:
         condition: service_started
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 1200s
