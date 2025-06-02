@@ -1,8 +1,10 @@
 **/__pycache__
 **/.venv
+**/.github
 **/.classpath
 **/.dockerignore
 **/.env
+**/.env.example
 **/.git
 **/.gitignore
 **/.project
@@ -10,6 +12,8 @@
 **/.toolstarget
 **/.vs
 **/.vscode
+**/.DS_Store
+**/*.*egg-info
 **/*.*proj.user
 **/*.dbmdl
 **/*.jfm

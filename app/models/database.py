@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal, Optional
 
 from sqlmodel import Field, SQLModel
@@ -10,8 +10,8 @@ class Dialogue(SQLModel, table=True):
     dify_conversation_id: Optional[str] = Field(default=None)
     status: str = Field(default="pending")
     assignee_id: Optional[int] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # This can be used for both validation and creation
@@ -118,7 +118,7 @@ class DifyResponse(SQLModel):
     conversation_id: Optional[str] = None
     mode: Optional[str] = None
     answer: str  # This is the only required field
-    metadata: Optional[dict] = None
+    response_metadata: Optional[dict] = None
     created_at: Optional[int] = None
 
     @classmethod
