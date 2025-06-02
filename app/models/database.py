@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 from typing import Literal, Optional
 
+from sqlalchemy import Column
+from sqlalchemy.types import DateTime as SqlaDateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -10,8 +12,23 @@ class Dialogue(SQLModel, table=True):
     dify_conversation_id: Optional[str] = Field(default=None)
     status: str = Field(default="pending")
     assignee_id: Optional[int] = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            SqlaDateTime(timezone=True),
+            nullable=False,
+            default=lambda: datetime.now(UTC),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            SqlaDateTime(timezone=True),
+            nullable=False,
+            default=lambda: datetime.now(UTC),
+            onupdate=lambda: datetime.now(UTC),
+        ),
+    )
 
 
 # This can be used for both validation and creation
@@ -88,8 +105,8 @@ class ChatwootWebhook(SQLModel):
         return None
 
     @property
-    def message_type(self) -> Optional[str]:
-        """Get message type"""
+    def derived_message_type(self) -> Optional[str]:
+        """Get message type from the nested message object"""
         return self.message.message_type if self.message else None
 
     @property
@@ -106,7 +123,9 @@ class ChatwootWebhook(SQLModel):
 
     def to_dialogue_create(self) -> DialogueCreate:
         return DialogueCreate(
-            chatwoot_conversation_id=str(self.conversation_id), status=self.status, assignee_id=self.assignee_id
+            chatwoot_conversation_id=str(self.conversation_id),
+            status=self.status or "pending",
+            assignee_id=self.assignee_id,
         )
 
 
