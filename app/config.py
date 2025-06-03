@@ -21,7 +21,7 @@ DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_
 
 # Redis configuration
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = os.getenv("REDIS_PORT", "6380")
+REDIS_PORT = os.getenv("REDIS_PORT", "6379")
 REDIS_BROKER = os.getenv("REDIS_BROKER", f"redis://{REDIS_HOST}:{REDIS_PORT}/0")
 REDIS_BACKEND = os.getenv("REDIS_BACKEND", f"redis://{REDIS_HOST}:{REDIS_PORT}/1")
 
