@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import (
@@ -52,7 +52,7 @@ async def get_or_create_dialogue(db: AsyncSession, data: DialogueCreate) -> Dial
         # Update existing dialogue with new data
         for field, value in data.model_dump(exclude_unset=True).items():
             setattr(dialogue, field, value)
-        dialogue.updated_at = datetime.utcnow()
+        dialogue.updated_at = datetime.now(UTC)
     else:
         # Create new dialogue
         dialogue = Dialogue(**data.model_dump())
@@ -381,7 +381,7 @@ async def update_team_cache():
 
             # Update the cache
             team_cache = new_cache
-            last_update_time = datetime.utcnow().timestamp()
+            last_update_time = datetime.now(UTC).timestamp()
 
             logger.info(f"Updated team cache with {len(team_cache)} teams")
             return team_cache
@@ -410,7 +410,7 @@ async def get_team_id(team_name: str) -> Optional[int]:
             return None
 
     # Use cache when enabled
-    cache_age_hours = (datetime.now(datetime.UTC).timestamp() - last_update_time) / 3600
+    cache_age_hours = (datetime.now(UTC).timestamp() - last_update_time) / 3600
     if not team_cache or cache_age_hours > TEAM_CACHE_TTL_HOURS:
         await update_team_cache()
 
