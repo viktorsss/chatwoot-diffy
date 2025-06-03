@@ -4,18 +4,25 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
+  release:
+    types: [published]
   workflow_dispatch:
-
-env:
-  DOCKER_IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    if: github.repository == 'eremeye/chatwoot-dify'
+    env:
+      DOCKER_IMAGE_NAME: ${{ secrets.CUSTOM_IMAGE_NAME || github.repository }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Sanitize branch name
+        if: github.event_name == 'pull_request'
+        run: echo "BRANCH_TAG=$(echo '${{ github.head_ref }}' | sed 's/\//-/g')" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -27,17 +34,25 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
-            ${{ env.DOCKER_IMAGE_NAME }}:latest
-            ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
-          cache-from: type=registry,ref=${{ env.DOCKER_IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.DOCKER_IMAGE_NAME }}:buildcache,mode=max
+            ${{ github.event_name == 'release' && format('{0}:latest', env.DOCKER_IMAGE_NAME) || '' }}
+            ${{ github.event_name == 'push' && format('{0}:develop', env.DOCKER_IMAGE_NAME) || '' }}
+            ${{ github.event_name == 'release' && format('{0}:{1}', env.DOCKER_IMAGE_NAME, github.ref_name) || '' }}
+            ${{ github.event_name == 'pull_request' && format('{0}:{1}', env.DOCKER_IMAGE_NAME, env.BRANCH_TAG) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Trigger deployment webhook
+      - name: Trigger deployment webhooks
         if: success()
+        env:
+          DEV_WEBHOOK_URL: ${{ secrets.DEV_DEPLOY_WEBHOOK }}
         run: |
-          curl -X POST ${{ secrets.DEV_DEPLOY_WEBHOOK }}
+          if [ -n "$DEV_WEBHOOK_URL" ]; then
+            curl -X POST "$DEV_WEBHOOK_URL"
+          else
+            echo "DEV_DEPLOY_WEBHOOK not set, skipping webhook call"
+          fi
