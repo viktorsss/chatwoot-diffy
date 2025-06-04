@@ -7,7 +7,10 @@ from dotenv import load_dotenv
 
 from app import config
 from app.api.chatwoot import ChatwootHandler
-from app.config import BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL, BOT_ERROR_MESSAGE_INTERNAL
+from app.config import (
+    BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
+    BOT_ERROR_MESSAGE_INTERNAL,
+)
 from app.database import SessionLocal
 from app.models.database import Dialogue, DifyResponse
 from app.utils.sentry import init_sentry
@@ -53,14 +56,26 @@ celery.config_from_object(config, namespace="CELERY")
 # Initialize Sentry on Celery daemon startup
 @signals.celeryd_init.connect
 def init_sentry_for_celery(**_kwargs):
-    if init_sentry(with_fastapi=False, with_asyncpg=False, with_celery=True, with_httpx=True, with_sqlalchemy=True):
+    if init_sentry(
+        with_fastapi=False,
+        with_asyncpg=False,
+        with_celery=True,
+        with_httpx=True,
+        with_sqlalchemy=True,
+    ):
         logger.info("Celery daemon: Sentry initialized with Celery, HTTPX, and SQLAlchemy integrations")
 
 
 # Initialize Sentry on each worker process startup
 @signals.worker_init.connect
 def init_sentry_for_worker(**_kwargs):
-    if init_sentry(with_fastapi=False, with_asyncpg=False, with_celery=True, with_httpx=True, with_sqlalchemy=True):
+    if init_sentry(
+        with_fastapi=False,
+        with_asyncpg=False,
+        with_celery=True,
+        with_httpx=True,
+        with_sqlalchemy=True,
+    ):
         logger.info("Celery worker: Sentry initialized with Celery, HTTPX, and SQLAlchemy integrations")
 
 
@@ -325,11 +340,17 @@ def handle_dify_response(dify_result: Dict[str, Any], conversation_id: int, dial
         dify_response_data = DifyResponse(**dify_result)
 
         # Send message back to Chatwoot. Sync is okay because we use separate instance of ChatwootHandler
-        chatwoot.send_message_sync(
-            conversation_id=conversation_id,
-            message=dify_response_data.answer,
-            private=False,
-        )
+        if dify_response_data.answer.strip():
+            chatwoot.send_message_sync(
+                conversation_id=conversation_id,
+                message=dify_response_data.answer,
+                private=False,
+            )
+        else:
+            logger.debug(
+                f"Dify response for conversation_id {conversation_id} had an empty or whitespace-only answer. "
+                "Skipping sending message to Chatwoot."
+            )
     except Exception as e:
         logger.error(f"Error handling Dify response: {str(e)}", exc_info=True)
         # Re-raise to ensure Celery knows this task failed
