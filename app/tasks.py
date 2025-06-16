@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 import httpx
 from celery import Celery, signals
 from dotenv import load_dotenv
+from sqlalchemy import select
 
 from app import config
 from app.api.chatwoot import ChatwootHandler
@@ -11,8 +12,9 @@ from app.config import (
     BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
     BOT_ERROR_MESSAGE_INTERNAL,
 )
-from app.database import SessionLocal
-from app.models.database import Dialogue, DifyResponse
+from app.db.models import Conversation
+from app.db.session import get_sync_session
+from app.schemas import DifyResponse
 from app.utils.sentry import init_sentry
 
 load_dotenv()
@@ -87,17 +89,29 @@ def make_dify_request(url: str, data: dict, headers: dict) -> dict:
         return response.json()
 
 
-# Helper function to update dialogue in DB (synchronous)
-def update_dialogue_dify_id_sync(chatwoot_convo_id: str, new_dify_id: str):
+# Helper function to update conversation in DB (synchronous with SQLAlchemy 2)
+def update_conversation_dify_id_sync(chatwoot_convo_id: str, new_dify_id: str):
+    """
+    Update the dify_conversation_id for a conversation using sync SQLAlchemy 2 session.
+    
+    Args:
+        chatwoot_convo_id: The Chatwoot conversation ID to search for
+        new_dify_id: The new Dify conversation ID to set
+    """
     logger.info(f"Attempting to update dify_conversation_id for chatwoot_convo_id={chatwoot_convo_id} to {new_dify_id}")
-    with SessionLocal() as db:  # Use synchronous session
+    with get_sync_session() as db:  # Use synchronous session
         try:
-            # Query dialogue based on chatwoot_conversation_id
-            dialogue = db.query(Dialogue).filter_by(chatwoot_conversation_id=chatwoot_convo_id).first()
-            if dialogue:
-                if not dialogue.dify_conversation_id:  # Update only if it's not already set
-                    dialogue.dify_conversation_id = new_dify_id
-                    db.commit()
+            # Use SQLAlchemy 2.x select syntax for sync session
+            statement = select(Conversation).where(
+                Conversation.chatwoot_conversation_id == chatwoot_convo_id
+            )
+            result = db.execute(statement)
+            conversation = result.scalar_one_or_none()
+            
+            if conversation:
+                if not conversation.dify_conversation_id:  # Update only if it's not already set
+                    conversation.dify_conversation_id = new_dify_id
+                    # Note: get_sync_session handles commit automatically
                     logger.info(f"Successfully updated dify_conversation_id for chatwoot_convo_id={chatwoot_convo_id}")
                 else:
                     logger.warning(
@@ -105,14 +119,15 @@ def update_dialogue_dify_id_sync(chatwoot_convo_id: str, new_dify_id: str):
                     )
             else:
                 logger.error(
-                    f"Dialogue record not found for chatwoot_conversation_id={chatwoot_convo_id} during update attempt."
+                    f"Conversation record not found for chatwoot_conversation_id={chatwoot_convo_id} "
+                    f"during update attempt."
                 )
         except Exception as e:
             logger.error(
                 f"Failed to update dify_conversation_id for chatwoot_convo_id={chatwoot_convo_id}: {e}",
                 exc_info=True,
             )
-            db.rollback()  # Rollback on error
+            # Note: get_sync_session handles rollback automatically on exception
 
 
 @celery.task(bind=True, max_retries=3, default_retry_delay=5)
@@ -180,7 +195,7 @@ def process_message_with_dify(
                 if new_dify_id:
                     logger.info(f"New Dify conversation created: {new_dify_id}. Updating database.")
                     # Update DB synchronously within the task
-                    update_dialogue_dify_id_sync(chatwoot_conversation_id, new_dify_id)
+                    update_conversation_dify_id_sync(chatwoot_conversation_id, new_dify_id)
                 else:
                     # --- MODIFIED: Error log and retry ---
                     error_msg = (
@@ -329,27 +344,27 @@ def process_message_with_dify(
 
 
 @celery.task(name="app.tasks.handle_dify_response")
-def handle_dify_response(dify_result: Dict[str, Any], conversation_id: int, dialogue_id: int):
+def handle_dify_response(dify_result: Dict[str, Any], conversation_id: int):
     """Handle the response from Dify"""
 
     chatwoot = ChatwootHandler()
 
-    # No need to update dialogue here anymore, it's done in process_message_with_dify if needed.
+    # No need to update conversation here anymore, it's done in process_message_with_dify if needed.
     # We still need the DifyResponse model for validation/extraction.
     try:
-        dify_response_data = DifyResponse(**dify_result)
+        dify_response_data = DifyResponse.model_validate(dify_result)
 
         # Send message back to Chatwoot. Sync is okay because we use separate instance of ChatwootHandler
-        if dify_response_data.answer.strip():
+        if dify_response_data.has_valid_answer():
             chatwoot.send_message_sync(
                 conversation_id=conversation_id,
                 message=dify_response_data.answer,
                 private=False,
             )
         else:
-            logger.debug(
+            logger.info(
                 f"Dify response for conversation_id {conversation_id} had an empty or whitespace-only answer. "
-                "Skipping sending message to Chatwoot."
+                f"Raw response: {dify_result}. Skipping sending message to Chatwoot."
             )
     except Exception as e:
         logger.error(f"Error handling Dify response: {str(e)}", exc_info=True)

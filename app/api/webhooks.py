@@ -24,9 +24,15 @@ from app.config import (
     ENABLE_TEAM_CACHE,
     TEAM_CACHE_TTL_HOURS,
 )
-from app.database import create_db_tables, get_db
-from app.models.database import ChatwootWebhook, Dialogue, DialogueCreate
-from app.models.non_database import ConversationPriority, ConversationStatus
+from app.db.session import get_session
+from app.db.utils import create_db_tables
+from app.models import Conversation, ConversationCreate, ConversationResponse
+from app.schemas import (
+    ChatwootWebhook,
+    ConversationPriority,
+    ConversationStatus,
+)
+from app.utils import handle_api_errors
 
 logger = logging.getLogger(__name__)
 
@@ -39,230 +45,245 @@ team_cache_lock = asyncio.Lock() if ENABLE_TEAM_CACHE else None
 last_update_time = 0
 
 
-async def get_or_create_dialogue(db: AsyncSession, data: DialogueCreate) -> Dialogue:
+async def get_or_create_conversation(db: AsyncSession, data: ConversationCreate) -> Conversation:
     """
-    Get existing dialogue or create a new one.
-    Updates the dialogue if it exists with new data.
+    Get existing conversation or create a new one.
+    Updates the conversation if it exists with new data.
+    Uses optimized SQLAlchemy 2.x query patterns.
     """
-    statement = select(Dialogue).where(Dialogue.chatwoot_conversation_id == data.chatwoot_conversation_id)
+    # Use SQLAlchemy 2.x select syntax with proper type hints
+    statement = select(Conversation).where(
+        Conversation.chatwoot_conversation_id == data.chatwoot_conversation_id
+    )
     result = await db.execute(statement)
-    dialogue = result.scalar_one_or_none()
+    conversation = result.scalar_one_or_none()
 
-    if dialogue:
-        # Update existing dialogue with new data
-        for field, value in data.model_dump(exclude_unset=True).items():
-            setattr(dialogue, field, value)
-        dialogue.updated_at = datetime.now(UTC)
+    if conversation:
+        # Update existing conversation with new data using Pydantic model_dump
+        update_data = data.model_dump(exclude_unset=True, exclude={'id'})
+        for field, value in update_data.items():
+            if hasattr(conversation, field):
+                setattr(conversation, field, value)
+        conversation.updated_at = datetime.now(UTC)
     else:
-        # Create new dialogue
-        dialogue = Dialogue(**data.model_dump())
-        db.add(dialogue)
+        # Create new conversation using Pydantic model_dump
+        conversation_data = data.model_dump(exclude={'id'})
+        conversation = Conversation(**conversation_data)
+        db.add(conversation)
 
-    await db.commit()
-    await db.refresh(dialogue)
-    return dialogue
+        # Flush to populate auto-generated fields (id, created_at, updated_at)
+        # This ensures the database assigns the auto-increment ID and timestamps
+        await db.flush()
+
+        # Refresh to ensure all fields are loaded from the database
+        await db.refresh(conversation)
+
+    # Note: No manual commit needed - six-line pattern handles this automatically
+    # The transaction will be committed when the context manager exits successfully
+    return conversation
 
 
 @router.post("/send-chatwoot-message")
+@handle_api_errors("send Chatwoot message")
 async def send_chatwoot_message(
     conversation_id: int,
     message: str,
     is_private: bool = False,
-    db: AsyncSession = Depends(get_db),
-):
+) -> Dict[str, str]:
     """
     Send a message to Chatwoot conversation.
     Can be used as a private note if is_private=True
     """
-    try:
-        # For private notes, we need to set both private=True and message_type="private"
-        await chatwoot.send_message(
-            conversation_id=conversation_id,
-            message=message,
-            private=is_private,
-        )
-        return {"status": "success", "message": "Message sent successfully"}
-    except Exception as e:
-        logger.error(f"Failed to send message to Chatwoot: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send message to Chatwoot") from e
+    # For private notes, we need to set both private=True and message_type="private"
+    await chatwoot.send_message(
+        conversation_id=conversation_id,
+        message=message,
+        private=is_private,
+    )
+    return {"status": "success", "message": "Message sent successfully"}
 
 
 @router.post("/chatwoot-webhook")
 async def chatwoot_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-):
-    print("Received Chatwoot webhook request")
-    payload = await request.json()
-    webhook_data = ChatwootWebhook.model_validate(payload)
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """Process Chatwoot webhook events."""
+    webhook_data = None
 
-    logger.info(f"Received webhook event: {webhook_data.event}")
-    logger.debug(f"Webhook payload: {payload}")
+    try:
+        print("Received Chatwoot webhook request")
+        payload = await request.json()
 
-    if webhook_data.event == "message_created":
-        logger.info(f"Webhook data: {webhook_data}")
-        if webhook_data.sender_type in [
-            "agent_bot",
-            "????",
-        ]:  # бот не реагирует на свои мессаги
-            logger.info(f"Skipping agent_bot message: {webhook_data.content}")
-            return {"status": "skipped", "reason": "agent_bot message"}
-        # conversation_is_open = webhook_data.status == "open"
-        # user_messages_when_pending = webhook_data.status == "pending" and webhook_data.message_type == "incoming"
-        # if not webhook_data.message:
-        #     logger.info(f"Skipping message with empty content: {webhook_data}")
-        #     return {"status": "skipped", "reason": "empty message"}
-        if str(webhook_data.content).startswith(BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL) or str(
-            webhook_data.content
-        ).startswith(BOT_ERROR_MESSAGE_INTERNAL):
-            logger.info(f"Skipping agent_bot message: {webhook_data.content}")
-            return {"status": "skipped", "reason": "agent_bot message"}
+        # Use Pydantic v2 model_validate for webhook data validation
+        webhook_data = ChatwootWebhook.model_validate(payload)
 
-        if True:  # we'll see if we need to filter by status later
-            print(f"Processing message: {webhook_data}")
-            try:
-                dialogue_data = webhook_data.to_dialogue_create()
-                dialogue = await get_or_create_dialogue(db, dialogue_data)
+        logger.info(f"Received webhook event: {webhook_data.event}")
+        logger.debug(f"Webhook payload: {payload}")
 
-                # Just start the task and return immediately
+        if webhook_data.event == "message_created":
+            logger.info(f"Webhook data: {webhook_data}")
+            if webhook_data.sender_type in [
+                "agent_bot",
+                "????",
+            ]:  # бот не реагирует на свои мессаги
+                logger.info(f"Skipping agent_bot message: {webhook_data.content}")
+                return {"status": "skipped", "reason": "agent_bot message"}
 
-                # https://github.com/langgenius/dify/issues/11140 IMPORTANT : `inputs` are cached for conversation
-                tasks.process_message_with_dify.apply_async(
-                    args=[
-                        webhook_data.content,
-                        dialogue.dify_conversation_id,
-                        dialogue.chatwoot_conversation_id,
-                        dialogue.status,
-                        webhook_data.message_type,
-                    ],
-                    link=tasks.handle_dify_response.s(
-                        conversation_id=webhook_data.conversation_id,
-                        dialogue_id=dialogue.id,
-                    ),
-                    link_error=tasks.handle_dify_error.s(
-                        conversation_id=webhook_data.conversation_id,
-                    ),
-                )
+            if str(webhook_data.content).startswith(BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL) or str(
+                webhook_data.content
+            ).startswith(BOT_ERROR_MESSAGE_INTERNAL):
+                logger.info(f"Skipping agent_bot message: {webhook_data.content}")
+                return {"status": "skipped", "reason": "agent_bot message"}
 
-                return {"status": "processing"}
+            if True:  # we'll see if we need to filter by status later
+                print(f"Processing message: {webhook_data}")
+                try:
+                    conversation_data = webhook_data.to_conversation_create()
+                    conversation = await get_or_create_conversation(db, conversation_data)
 
-            except Exception as e:
-                logger.error(f"Failed to process message with Dify: {e}")
-                if webhook_data.conversation_id is not None:
-                    await send_chatwoot_message(
-                        conversation_id=webhook_data.conversation_id,
-                        message=BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
-                        is_private=False,
-                        db=db,
-                    )
-                else:
-                    logger.error(
-                        "Cannot send error message: conversation_id is "
-                        f"None in webhook data for event {webhook_data.event}"
+                    # Start the task and return immediately
+                    tasks.process_message_with_dify.apply_async(
+                        args=[
+                            webhook_data.content,
+                            conversation.dify_conversation_id,
+                            conversation.chatwoot_conversation_id,
+                            conversation.status,
+                            webhook_data.message_type,
+                        ],
+                        link=tasks.handle_dify_response.s(
+                            conversation_id=webhook_data.conversation_id,
+                        ),
+                        link_error=tasks.handle_dify_error.s(
+                            conversation_id=webhook_data.conversation_id,
+                        ),
                     )
 
-    elif webhook_data.event == "conversation_created":
-        if not webhook_data.conversation:
-            return {"status": "skipped", "reason": "no conversation data"}
+                    return {"status": "processing"}
 
-        dialogue_data = webhook_data.to_dialogue_create()
-        dialogue = await get_or_create_dialogue(db, dialogue_data)
-        return {"status": "success", "dialogue_id": dialogue.id}
+                except Exception as e:
+                    logger.error(f"Failed to process message with Dify: {e}", exc_info=True)
 
-    elif webhook_data.event == "conversation_updated":
-        if not webhook_data.conversation:
-            return {"status": "skipped", "reason": "no conversation data"}
+                    # Try to send error message to Chatwoot if conversation_id is available
+                    if webhook_data and webhook_data.conversation_id is not None:
+                        try:
+                            await chatwoot.send_message(
+                                conversation_id=webhook_data.conversation_id,
+                                message=BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
+                                private=False,
+                            )
+                        except Exception as send_error:
+                            logger.error(f"Failed to send error message to Chatwoot: {send_error}")
 
-        dialogue_data = webhook_data.to_dialogue_create()
-        dialogue = await get_or_create_dialogue(db, dialogue_data)
-        return {"status": "success", "dialogue_id": dialogue.id}
+                    # Re-raise the original exception to trigger proper error handling
+                    raise
 
-    elif webhook_data.event == "conversation_deleted":
-        if not webhook_data.conversation:
-            return {"status": "skipped", "reason": "no conversation data"}
+        elif webhook_data.event == "conversation_created":
+            if not webhook_data.conversation:
+                return {"status": "skipped", "reason": "no conversation data"}
 
-        conversation_id = str(webhook_data.conversation.id)
-        statement = select(Dialogue).where(Dialogue.chatwoot_conversation_id == conversation_id)
-        dialogue = await db.execute(statement)
-        dialogue = dialogue.scalar_one_or_none()
+            conversation_data = webhook_data.to_conversation_create()
+            conversation = await get_or_create_conversation(db, conversation_data)
+            return {"status": "success", "conversation_id": conversation.id}
 
-        if dialogue and dialogue.dify_conversation_id:
-            background_tasks.add_task(tasks.delete_dify_conversation, dialogue.dify_conversation_id)
-            await db.delete(dialogue)
-            await db.commit()
+        elif webhook_data.event == "conversation_updated":
+            if not webhook_data.conversation:
+                return {"status": "skipped", "reason": "no conversation data"}
 
-    return {"status": "success"}
+            conversation_data = webhook_data.to_conversation_create()
+            conversation = await get_or_create_conversation(db, conversation_data)
+            return {"status": "success", "conversation_id": conversation.id}
 
+        elif webhook_data.event == "conversation_deleted":
+            if not webhook_data.conversation:
+                return {"status": "skipped", "reason": "no conversation data"}
 
-@router.post("/update-labels/{conversation_id}")
-async def update_labels(conversation_id: int, labels: List[str], db: AsyncSession = Depends(get_db)):
-    """
-    Update labels for a Chatwoot conversation
+            conversation_id = str(webhook_data.conversation.id)
+            statement = select(Conversation).where(Conversation.chatwoot_conversation_id == conversation_id)
+            result = await db.execute(statement)
+            conversation = result.scalar_one_or_none()
 
-    Parameters:
-    - conversation_id: The ID of the conversation to update (path parameter)
-    - labels: List of label strings to apply to the conversation (request body)
-    """
-    try:
-        result = await chatwoot.add_labels(conversation_id=conversation_id, labels=labels)
-        return {
-            "status": "success",
-            "conversation_id": conversation_id,
-            "labels": result,
-        }
-    except Exception as e:
-        logger.error(f"Failed to update labels for conversation {conversation_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update labels: {str(e)}") from e
+            if conversation and conversation.dify_conversation_id:
+                background_tasks.add_task(tasks.delete_dify_conversation, conversation.dify_conversation_id)
+                await db.delete(conversation)
+                # Note: No manual commit needed - six-line pattern handles this automatically
 
+        return {"status": "success"}
 
-@router.post("/update-custom-attributes/{conversation_id}")
-async def update_custom_attributes(
-    conversation_id: int,
-    custom_attributes: Dict[str, Any],
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Update custom attributes for a Chatwoot conversation
-
-    Parameters:
-    - conversation_id: The ID of the conversation to update (path parameter)
-    - custom_attributes: Dictionary of custom attributes to set (request body)
-
-    Example request body:
-    {"region": "Moscow", "region_original_string": "Moscow"}
-    """
-    if not isinstance(custom_attributes, dict) or not custom_attributes:
-        return {
-            "status": "success",
-            "conversation_id": conversation_id,
-            "custom_attributes": "No custom attrs provided",
-        }
-    try:
-        result = await chatwoot.update_custom_attributes(
-            conversation_id=conversation_id, custom_attributes=custom_attributes
-        )
-        logger.info(f"Updated custom attributes for conversation {conversation_id}: {result}")
-        return {
-            "status": "success",
-            "conversation_id": conversation_id,
-            "custom_attributes": result,
-        }
-    except Exception as e:
-        # Log the full exception details including traceback
-        logger.exception(f"Failed to update custom attributes for conversation {conversation_id}:")
+    except ValueError as e:
+        # Pydantic validation errors or other value-related errors
+        logger.error(f"Validation error in webhook: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500,
+            status_code=422,
             detail={
-                "error": str(e),
-                "conversation_id": conversation_id,
-                "attempted_attributes": custom_attributes,
-                "traceback": f"{type(e).__name__}: {str(e)}",
+                "error": "Validation error",
+                "message": str(e),
+                "event": webhook_data.event if webhook_data else "unknown",
             },
         ) from e
 
+    except Exception as e:
+        # Database errors (including transaction errors) and other unexpected errors
+        logger.error(f"Unexpected error in webhook processing: {e}", exc_info=True)
+
+        # For database transaction errors, the six-line pattern will handle rollback automatically
+        # We just need to provide a proper error response
+
+        error_detail = {
+            "error": "Internal server error",
+            "message": "Failed to process webhook",
+            "event": webhook_data.event if webhook_data else "unknown",
+        }
+
+        # Include conversation_id in error response if available for debugging
+        if webhook_data and hasattr(webhook_data, "conversation_id") and webhook_data.conversation_id:
+            error_detail["conversation_id"] = webhook_data.conversation_id
+
+        raise HTTPException(status_code=500, detail=error_detail) from e
+
+
+@router.post("/update-labels/{conversation_id}")
+@handle_api_errors("update labels")
+async def update_labels(
+    conversation_id: int,
+    labels: List[str],
+    db: AsyncSession = Depends(get_session)
+) -> Dict[str, Any]:
+    """Update labels for a Chatwoot conversation."""
+    result = await chatwoot.add_labels(conversation_id, labels)
+    return {"status": "success", "labels": labels, "result": result}
+
+
+@router.post("/update-custom-attributes/{conversation_id}")
+@handle_api_errors("update custom attributes")
+async def update_custom_attributes(
+    conversation_id: int,
+    custom_attributes: Dict[str, Any],
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """Update custom attributes for a Chatwoot conversation."""
+    result = await chatwoot.update_custom_attributes(conversation_id, custom_attributes)
+
+    # Update local conversation record if it exists
+    statement = select(Conversation).where(Conversation.chatwoot_conversation_id == str(conversation_id))
+    result_db = await db.execute(statement)
+    conversation = result_db.scalar_one_or_none()
+
+    if conversation:
+        conversation.updated_at = datetime.now(UTC)
+        # Note: No manual commit needed - six-line pattern handles this automatically
+
+    return {
+        "status": "success",
+        "conversation_id": conversation_id,
+        "custom_attributes": custom_attributes,
+        "result": result,
+    }
+
 
 @router.post("/toggle-priority/{conversation_id}")
+@handle_api_errors("toggle conversation priority")
 async def toggle_conversation_priority(
     conversation_id: int,
     priority: ConversationPriority = Body(
@@ -270,98 +291,68 @@ async def toggle_conversation_priority(
         embed=True,
         description="Priority level: 'urgent', 'high', 'medium', 'low', or None",
     ),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Toggle the priority of a Chatwoot conversation
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """Toggle the priority of a Chatwoot conversation."""
+    # Convert enum to string value for Chatwoot API
+    priority_value = priority.value if priority else None
+    result = await chatwoot.toggle_priority(conversation_id, priority_value)
 
-    Parameters:
-    - conversation_id: The ID of the conversation to update (path parameter)
-    - priority: Priority level to set (request body)
+    # Update local conversation record if it exists
+    statement = select(Conversation).where(Conversation.chatwoot_conversation_id == str(conversation_id))
+    result_db = await db.execute(statement)
+    conversation = result_db.scalar_one_or_none()
 
-    Example request body:
-        {
-            "priority": "high"
-        }
-    """
-    try:
-        priority_value = priority.value
-        if not priority_value or priority_value.lower() == "none":
-            return {
-                "status": "success",
-                "conversation_id": conversation_id,
-                "priority": "None",
-            }
-        logger.info(f"Attempting to set priority {priority_value} for conversation {conversation_id}")
-        result = await chatwoot.toggle_priority(conversation_id=conversation_id, priority=str(priority_value))
-        return {
-            "status": "success",
-            "conversation_id": conversation_id,
-            "priority": result,
-        }
-    except Exception as e:
-        # Log the full exception details
-        logger.exception(f"Detailed error when toggling priority for conversation {conversation_id}:")
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": str(e),
-                "conversation_id": conversation_id,
-                "attempted_priority": str(priority_value),
-            },
-        ) from e
+    if conversation:
+        conversation.updated_at = datetime.now(UTC)
+        # Note: No manual commit needed - six-line pattern handles this automatically
+
+    return {
+        "status": "success",
+        "conversation_id": conversation_id,
+        "priority": priority_value,
+        "result": result,
+    }
 
 
 @router.get("/conversations/dify/{dify_conversation_id}")
-async def get_chatwoot_conversation_id(dify_conversation_id: str, db: AsyncSession = Depends(get_db)):
-    """
-    Get Chatwoot conversation ID from Dify conversation ID
-    """
-    statement = select(Dialogue).where(Dialogue.dify_conversation_id == dify_conversation_id)
-    dialogue = await db.execute(statement)
-    dialogue = dialogue.scalar_one_or_none()
-
-    if not dialogue:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No conversation found with Dify ID: {dify_conversation_id}",
-        )
-
-    return {
-        "chatwoot_conversation_id": dialogue.chatwoot_conversation_id,
-        "status": dialogue.status,
-        "assignee_id": dialogue.assignee_id,
-    }
-
-
-@router.get("/dialogue-info/{chatwoot_conversation_id}")
-async def get_dialogue_info(chatwoot_conversation_id: int, db: AsyncSession = Depends(get_db)):
-    """
-    Retrieve dialogue information, including the Dify conversation ID,
-    based on the Chatwoot conversation ID. Used for testing/debugging.
-    """
-    logger.debug(f"Received request for dialogue info for Chatwoot convo ID: {chatwoot_conversation_id}")
-    statement = select(Dialogue).where(Dialogue.chatwoot_conversation_id == str(chatwoot_conversation_id))
-    result = await db.execute(statement)
-    dialogue = result.scalar_one_or_none()
-
-    if not dialogue:
-        logger.warning(f"Dialogue not found for Chatwoot convo ID: {chatwoot_conversation_id}")
-        raise HTTPException(
-            status_code=404,
-            detail=f"Dialogue not found for Chatwoot conversation ID {chatwoot_conversation_id}",
-        )
-
-    logger.debug(
-        f"Found dialogue for Chatwoot convo ID {chatwoot_conversation_id}: Dify ID = {dialogue.dify_conversation_id}"
+@handle_api_errors("get conversation by Dify ID")
+async def get_chatwoot_conversation_id(
+    dify_conversation_id: str,
+    db: AsyncSession = Depends(get_session)
+) -> ConversationResponse:
+    """Get Chatwoot conversation ID from Dify conversation ID using proper response serialization."""
+    statement = select(Conversation).where(
+        Conversation.dify_conversation_id == dify_conversation_id
     )
-    return {
-        "chatwoot_conversation_id": dialogue.chatwoot_conversation_id,
-        "dify_conversation_id": dialogue.dify_conversation_id,
-        "status": dialogue.status,  # TODO: this probably can be outdated
-        "created_at": dialogue.created_at,
-        "updated_at": dialogue.updated_at,
-    }
+    result = await db.execute(statement)
+    conversation = result.scalar_one_or_none()
+
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Use Pydantic v2 model_validate with from_attributes for proper serialization
+    return ConversationResponse.model_validate(conversation, from_attributes=True)
+
+
+@router.get("/conversation-info/{chatwoot_conversation_id}")
+@handle_api_errors("get conversation info")
+async def get_conversation_info(
+    chatwoot_conversation_id: int,
+    db: AsyncSession = Depends(get_session)
+) -> ConversationResponse:
+    """Get conversation information using optimized query and proper response serialization."""
+    statement = select(Conversation).where(
+        Conversation.chatwoot_conversation_id == str(chatwoot_conversation_id)
+    )
+    result = await db.execute(statement)
+    conversation = result.scalar_one_or_none()
+
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Use Pydantic v2 model_validate with from_attributes for proper serialization
+    return ConversationResponse.model_validate(conversation, from_attributes=True)
 
 
 async def update_team_cache():
@@ -418,24 +409,20 @@ async def get_team_id(team_name: str) -> Optional[int]:
 
 
 @router.post("/refresh-teams")
+@handle_api_errors("refresh teams cache")
 async def refresh_teams_cache():
     """Manually refresh the team cache."""
     if not ENABLE_TEAM_CACHE:
         # When caching is disabled, just return current teams from API
-        try:
-            teams = await chatwoot.get_teams()
-            return {"status": "success", "teams": len(teams), "cache_enabled": False}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to fetch teams: {str(e)}") from e
+        teams = await chatwoot.get_teams()
+        return {"status": "success", "teams": len(teams), "cache_enabled": False}
 
-    try:
-        teams = await update_team_cache()
-        return {"status": "success", "teams": len(teams), "cache_enabled": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to refresh teams: {str(e)}") from e
+    teams = await update_team_cache()
+    return {"status": "success", "teams": len(teams), "cache_enabled": True}
 
 
 @router.post("/assign-team/{conversation_id}")
+@handle_api_errors("assign conversation to team")
 async def assign_conversation_to_team(
     conversation_id: int,
     team: str = Body(
@@ -443,139 +430,107 @@ async def assign_conversation_to_team(
         embed=True,
         description="Team name to assign the conversation to",
     ),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Assign a Chatwoot conversation to a team
-
-    Parameters:
-    - conversation_id: The ID of the conversation to update (path parameter)
-    - team: Team name to assign (request body)
-
-    Example request body:
-        {
-            "team": "Support"
-        }
-    """
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """Assign a Chatwoot conversation to a team using optimized patterns."""
     if not team or team.lower() == "none":
         return {"status": "success", "conversation_id": conversation_id, "team": "None"}
-    try:
-        # Log the attempt
-        logger.info(f"Attempting to assign conversation {conversation_id} to team {team}")
 
-        # Get team_id from name
-        team_id = await get_team_id(team)
+    # Log the attempt
+    logger.info(f"Attempting to assign conversation {conversation_id} to team {team}")
+
+    # Get team_id from name
+    team_id = await get_team_id(team)
+
+    if team_id is None:
+        if ENABLE_TEAM_CACHE:
+            # Try to refresh the cache and try again
+            await update_team_cache()
+            team_id = await get_team_id(team)
 
         if team_id is None:
-            if ENABLE_TEAM_CACHE:
-                # Try to refresh the cache and try again
-                await update_team_cache()
-                team_id = await get_team_id(team)
+            # Get available teams for error message
+            try:
+                if ENABLE_TEAM_CACHE:
+                    available_teams = list(team_cache.keys())
+                else:
+                    teams = await chatwoot.get_teams()
+                    available_teams = [team["name"].lower() for team in teams]
+            except Exception:
+                available_teams = ["Unable to fetch teams"]
 
-            if team_id is None:
-                # Get available teams for error message
-                try:
-                    if ENABLE_TEAM_CACHE:
-                        available_teams = list(team_cache.keys())
-                    else:
-                        teams = await chatwoot.get_teams()
-                        available_teams = [team["name"].lower() for team in teams]
-                except Exception:
-                    available_teams = ["Unable to fetch teams"]
+            raise HTTPException(
+                status_code=404,
+                detail=f"Team '{team}' not found. Available teams: {available_teams}",
+            )
 
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Team '{team}' not found. Available teams: {available_teams}",
-                )
+    # Assign the conversation to the team
+    result = await chatwoot.assign_team(conversation_id=conversation_id, team_id=team_id)
 
-        # Assign the conversation to the team
-        result = await chatwoot.assign_team(conversation_id=conversation_id, team_id=team_id)
+    # Update local conversation record if it exists
+    statement = select(Conversation).where(Conversation.chatwoot_conversation_id == str(conversation_id))
+    result_db = await db.execute(statement)
+    conversation = result_db.scalar_one_or_none()
 
-        # Log successful result
-        logger.info(f"Successfully assigned conversation {conversation_id} to team {team} (ID: {team_id})")
+    if conversation:
+        conversation.updated_at = datetime.now(UTC)
+        # Note: No manual commit needed - six-line pattern handles this automatically
 
-        return {
-            "status": "success",
-            "conversation_id": conversation_id,
-            "team": team,
-            "team_id": team_id,
-            "result": result,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Log the full exception details
-        logger.exception(f"Detailed error when assigning team for conversation {conversation_id}:")
+    # Log successful result
+    logger.info(f"Successfully assigned conversation {conversation_id} to team {team} (ID: {team_id})")
 
-        # Get available teams for error details
-        try:
-            if ENABLE_TEAM_CACHE:
-                available_teams = list(team_cache.keys())
-            else:
-                teams = await chatwoot.get_teams()
-                available_teams = [team["name"].lower() for team in teams]
-        except Exception:
-            available_teams = ["Unable to fetch teams"]
-
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": str(e),
-                "conversation_id": conversation_id,
-                "attempted_team": team,
-                "available_teams": available_teams,
-                "cache_enabled": ENABLE_TEAM_CACHE,
-            },
-        ) from e
+    return {
+        "status": "success",
+        "conversation_id": conversation_id,
+        "team": team,
+        "team_id": team_id,
+        "result": result,
+    }
 
 
 @router.post("/toggle-status/{conversation_id}")
+@handle_api_errors("toggle conversation status")
 async def toggle_conversation_status(
     conversation_id: int,
     status: ConversationStatus = Body(..., embed=True),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Toggle the status of a Chatwoot conversation
-
-    Parameters:
-    - conversation_id: The ID of the conversation to update (path parameter)
-    - status: Status to set (request body)
-
-    Example request body:
-        {
-            "status": "open"
-        }
-    """
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """Toggle the status of a Chatwoot conversation using optimized patterns."""
+    # Get current conversation data to find out the previous status
+    previous_status_val: Optional[str] = None
     try:
-        # Get current conversation data to find out the previous status
-        previous_status_val: Optional[str] = None
-        try:
-            conversation_data = await chatwoot.get_conversation_data(conversation_id)
-            previous_status_val = conversation_data.get("status")
-            logger.info(f"Current status for convo {conversation_id} before toggle: {previous_status_val}")
-        except Exception as e_get_status:
-            # Log the error but proceed, previous_status will be None
-            # The notification logic in toggle_status handles previous_status being None
-            logger.warning(f"Could not fetch current status for convo {conversation_id} before toggle: {e_get_status}")
+        conversation_data = await chatwoot.get_conversation_data(conversation_id)
+        previous_status_val = conversation_data.get("status")
+        logger.info(f"Current status for convo {conversation_id} before toggle: {previous_status_val}")
+    except Exception as e_get_status:
+        # Log the error but proceed, previous_status will be None
+        # The notification logic in toggle_status handles previous_status being None
+        logger.warning(f"Could not fetch current status for convo {conversation_id} before toggle: {e_get_status}")
 
-        result = await chatwoot.toggle_status(
-            conversation_id=conversation_id,
-            status=status.value,
-            previous_status=previous_status_val,
-            is_error_transition=False,  # This is not an error-induced transition
-        )
-        return {
-            "status": "success",
-            "conversation_id": conversation_id,
-            "result": result,
-        }
-    except Exception as e:
-        logger.exception(f"Failed to toggle status for conversation {conversation_id}:")
-        raise HTTPException(
-            status_code=500,
-            detail={"error": str(e), "conversation_id": conversation_id},
-        ) from e
+    result = await chatwoot.toggle_status(
+        conversation_id=conversation_id,
+        status=status.value,
+        previous_status=previous_status_val,
+        is_error_transition=False,  # This is not an error-induced transition
+    )
+
+    # Update local conversation record if it exists
+    statement = select(Conversation).where(Conversation.chatwoot_conversation_id == str(conversation_id))
+    result_db = await db.execute(statement)
+    conversation = result_db.scalar_one_or_none()
+
+    if conversation:
+        conversation.status = status.value
+        conversation.updated_at = datetime.now(UTC)
+        # Note: No manual commit needed - six-line pattern handles this automatically
+
+    return {
+        "status": "success",
+        "conversation_id": conversation_id,
+        "new_status": status.value,
+        "previous_status": previous_status_val,
+        "result": result,
+    }
 
 
 @asynccontextmanager
