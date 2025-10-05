@@ -33,6 +33,7 @@ class ChatwootHandler:
         self.admin_api_key = admin_api_key or config.CHATWOOT_ADMIN_API_KEY
         self.headers = {
             "api_access_token": self.api_key,
+            "api-access-token": self.api_key,
             "Content-Type": "application/json",
         }
         self.admin_headers = {
