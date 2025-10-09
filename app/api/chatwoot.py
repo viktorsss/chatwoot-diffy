@@ -38,6 +38,7 @@ class ChatwootHandler:
         }
         self.admin_headers = {
             "api_access_token": self.admin_api_key,
+            "api-access-token": self.api_key,
             "Content-Type": "application/json",
         }
         # Base URLs
@@ -316,7 +317,7 @@ class ChatwootHandler:
 
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=self.headers)
+                response = await client.get(url, headers=self.admin_headers)
                 response.raise_for_status()
                 data = response.json()
 
