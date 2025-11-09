@@ -62,6 +62,8 @@ CHATWOOT_API_KEY = os.getenv("CHATWOOT_API_KEY", "")
 CHATWOOT_ADMIN_API_KEY = os.getenv("CHATWOOT_ADMIN_API_KEY", "")
 CHATWOOT_ACCOUNT_ID = os.getenv("CHATWOOT_ACCOUNT_ID", "1")
 ALLOWED_CONVERSATION_STATUSES = os.getenv("ALLOWED_CONVERSATION_STATUSES", "open,pending").split(",")
+# Cooldown (seconds) to wait before combining and dispatching consecutive user messages
+CHATWOOT_MESSAGE_DEBOUNCE_SECONDS = float(os.getenv("CHATWOOT_MESSAGE_DEBOUNCE_SECONDS", "15.0"))
 
 # Team cache configuration - disabled by default for better API reliability
 ENABLE_TEAM_CACHE = os.getenv("ENABLE_TEAM_CACHE", "False").lower() in ("true", "1", "t")
