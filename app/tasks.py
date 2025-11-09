@@ -138,6 +138,7 @@ def process_message_with_dify(
     chatwoot_conversation_id: Optional[str] = None,
     conversation_status: Optional[str] = None,
     message_type: Optional[str] = None,  # `incoming` and `outgoing`
+    batch_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Process a message with Dify and return the response as a dictionary.
@@ -156,7 +157,8 @@ def process_message_with_dify(
 
     logger.info(
         f"Processing message with Dify for chatwoot_conversation_id={chatwoot_conversation_id}, "
-        f"dify_conversation_id={dify_conversation_id}, direction: {message_type}"
+        f"dify_conversation_id={dify_conversation_id}, direction: {message_type}, "
+        f"metadata_keys={list(batch_metadata.keys()) if batch_metadata else []}"
     )
     data = {
         "query": message,
@@ -168,6 +170,9 @@ def process_message_with_dify(
         "response_mode": config.DIFY_RESPONSE_MODE,
         "user": "user",
     }
+
+    if batch_metadata:
+        data["inputs"]["chatwoot_batch_metadata"] = batch_metadata
 
     # Only include conversation_id in the payload if it's already set
     if dify_conversation_id:

@@ -1,7 +1,7 @@
 """Database and data models package."""
 
 # Database models (SQLAlchemy 2)
-from app.db.models import Conversation
+from app.db.models import ChatwootMessageBatch, ChatwootUserMessage, Conversation
 
 # DTO schemas (Pydantic v2) - imported from new schemas package
 from app.schemas import (
@@ -22,6 +22,8 @@ from app.schemas import (
 __all__ = [
     # Database models
     "Conversation",
+    "ChatwootMessageBatch",
+    "ChatwootUserMessage",
     # DTO schemas
     "ConversationCreate",
     "ConversationCreateRequest",
