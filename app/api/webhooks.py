@@ -1,8 +1,12 @@
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from time import monotonic
+from typing import Any, Dict, List, Optional, Callable, AsyncIterator
+from uuid import uuid4
 
 from fastapi import (
     APIRouter,
@@ -13,6 +17,7 @@ from fastapi import (
     HTTPException,
     Request,
 )
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -22,11 +27,18 @@ from app.config import (
     BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
     BOT_ERROR_MESSAGE_INTERNAL,
     ENABLE_TEAM_CACHE,
+    CHATWOOT_MESSAGE_DEBOUNCE_SECONDS,
     TEAM_CACHE_TTL_HOURS,
 )
-from app.db.session import get_session
+from app.db.session import get_async_session, get_session
 from app.db.utils import create_db_tables
-from app.models import Conversation, ConversationCreate, ConversationResponse
+from app.models import (
+    ChatwootMessageBatch,
+    ChatwootUserMessage,
+    Conversation,
+    ConversationCreate,
+    ConversationResponse,
+)
 from app.schemas import (
     ChatwootWebhook,
     ConversationPriority,
@@ -44,6 +56,291 @@ team_cache: Dict[str, int] = {} if ENABLE_TEAM_CACHE else {}
 team_cache_lock = asyncio.Lock() if ENABLE_TEAM_CACHE else None
 last_update_time = 0
 
+
+@dataclass
+class BufferedMessage:
+    record_id: int
+    chatwoot_message_id: str
+    content: str
+
+
+@dataclass
+class ConversationBufferState:
+    conversation_db_id: Optional[int]
+    dify_conversation_id: Optional[str]
+    is_typing: bool = False
+    messages: List[BufferedMessage] = field(default_factory=list)
+    timer_task: Optional[asyncio.Task] = None
+    last_activity: float = field(default_factory=monotonic)
+
+
+class ChatwootMessageAggregator:
+    """Orchestrates debounce and dispatch of grouped Chatwoot user messages."""
+
+    def __init__(
+        self,
+        cooldown_seconds: float,
+        session_factory: Callable[[], AsyncIterator[AsyncSession]],
+    ):
+        self.cooldown_seconds = cooldown_seconds
+        self._session_factory = session_factory
+        self._buffers: Dict[str, ConversationBufferState] = {}
+        self._lock = asyncio.Lock()
+
+    def configure_session_factory(self, session_factory: Callable[[], AsyncIterator[AsyncSession]]):
+        """Allow tests to swap the session provider."""
+        self._session_factory = session_factory
+
+    def _schedule_timer_locked(self, conversation_key: str, state: ConversationBufferState):
+        if state.timer_task:
+            state.timer_task.cancel()
+        state.timer_task = asyncio.create_task(self._timer(conversation_key))
+
+    async def reset(self):
+        """Cancel outstanding timers and clear buffered state."""
+        async with self._lock:
+            for state in self._buffers.values():
+                if state.timer_task:
+                    state.timer_task.cancel()
+            self._buffers.clear()
+
+    async def add_message(
+        self,
+        conversation_key: str,
+        conversation_db_id: int,
+        dify_conversation_id: Optional[str],
+        message_record_id: int,
+        chatwoot_message_id: str,
+        content: str,
+    ):
+        buffered = BufferedMessage(
+            record_id=message_record_id,
+            chatwoot_message_id=chatwoot_message_id,
+            content=content,
+        )
+        async with self._lock:
+            state = self._buffers.get(conversation_key)
+            if not state:
+                state = ConversationBufferState(
+                    conversation_db_id=conversation_db_id,
+                    dify_conversation_id=dify_conversation_id,
+                )
+                self._buffers[conversation_key] = state
+            else:
+                if state.conversation_db_id is None:
+                    state.conversation_db_id = conversation_db_id
+                if dify_conversation_id:
+                    state.dify_conversation_id = dify_conversation_id
+            state.messages.append(buffered)
+            state.last_activity = monotonic()
+            state.is_typing = False  # message send implies pause in typing
+            self._schedule_timer_locked(conversation_key, state)
+
+    async def set_typing_state(
+        self,
+        conversation_key: str,
+        is_typing: bool,
+        conversation_db_id: Optional[int] = None,
+        dify_conversation_id: Optional[str] = None,
+    ):
+        async with self._lock:
+            state = self._buffers.get(conversation_key)
+            if not state:
+                state = ConversationBufferState(
+                    conversation_db_id=conversation_db_id,
+                    dify_conversation_id=dify_conversation_id,
+                )
+                self._buffers[conversation_key] = state
+            else:
+                if conversation_db_id and state.conversation_db_id is None:
+                    state.conversation_db_id = conversation_db_id
+                if dify_conversation_id:
+                    state.dify_conversation_id = dify_conversation_id
+
+            state.is_typing = is_typing
+            state.last_activity = monotonic()
+
+            if is_typing:
+                if state.timer_task:
+                    state.timer_task.cancel()
+                    state.timer_task = None
+            else:
+                if state.messages:
+                    self._schedule_timer_locked(conversation_key, state)
+                elif not state.messages and state.conversation_db_id is None:
+                    # Remove empty placeholder buffers without conversation linkage
+                    self._buffers.pop(conversation_key, None)
+
+    async def _timer(self, conversation_key: str):
+        try:
+            await asyncio.sleep(self.cooldown_seconds)
+            await self._on_timer_expired(conversation_key)
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            logger.exception("Unexpected error in debounce timer for %s: %s", conversation_key, exc)
+
+    async def _on_timer_expired(self, conversation_key: str):
+        async with self._lock:
+            state = self._buffers.get(conversation_key)
+            if not state:
+                return
+
+            state.timer_task = None
+
+            if state.is_typing:
+                # User resumed typing during countdown; restart timer
+                self._schedule_timer_locked(conversation_key, state)
+                return
+
+            if not state.messages:
+                if not state.is_typing and state.conversation_db_id is None:
+                    self._buffers.pop(conversation_key, None)
+                return
+
+            buffered_messages = list(state.messages)
+            state.messages.clear()
+            conversation_db_id = state.conversation_db_id
+            dify_conversation_id = state.dify_conversation_id
+
+        if conversation_db_id is None:
+            logger.warning(
+                "Cannot dispatch combined messages for conversation %s without database ID",
+                conversation_key,
+            )
+            return
+
+        await self._dispatch_messages(
+            conversation_key=conversation_key,
+            conversation_db_id=conversation_db_id,
+            dify_conversation_id=dify_conversation_id,
+            buffered_messages=buffered_messages,
+        )
+
+    async def _dispatch_messages(
+        self,
+        conversation_key: str,
+        conversation_db_id: int,
+        dify_conversation_id: Optional[str],
+        buffered_messages: List[BufferedMessage],
+    ):
+        message_ids = [msg.chatwoot_message_id for msg in buffered_messages]
+        record_ids = [msg.record_id for msg in buffered_messages]
+        combined_content = self._combine_content(buffered_messages)
+        batch_key = uuid4().hex
+
+        if not combined_content.strip():
+            logger.info(
+                "Skipping dispatch for conversation %s due to empty combined content (messages: %s)",
+                conversation_key,
+                message_ids,
+            )
+            async with self._lock:
+                state = self._buffers.get(conversation_key)
+                if state and not state.messages and not state.is_typing:
+                    self._buffers.pop(conversation_key, None)
+            return
+
+        async with self._session_factory() as session:
+            conversation = await session.get(Conversation, conversation_db_id)
+            if not conversation:
+                logger.error(
+                    "Conversation %s not found when dispatching buffered messages (%s)",
+                    conversation_db_id,
+                    conversation_key,
+                )
+                return
+
+            dify_conversation_id = conversation.dify_conversation_id
+            status = conversation.status
+            chatwoot_convo_id = conversation.chatwoot_conversation_id
+
+            batch_record = ChatwootMessageBatch(
+                batch_key=batch_key,
+                conversation_id=conversation.id,
+                dify_conversation_id=dify_conversation_id,
+                chatwoot_message_ids=json.dumps(message_ids),
+                combined_content=combined_content,
+            )
+            session.add(batch_record)
+            await session.flush()
+
+            await session.execute(
+                update(ChatwootUserMessage)
+                .where(ChatwootUserMessage.id.in_(record_ids))
+                .values(batch_id=batch_record.id)
+            )
+
+        metadata = {
+            "batch_key": batch_key,
+            "chatwoot_message_ids": message_ids,
+        }
+        apply_kwargs: Dict[str, Any] = {
+            "args": [combined_content, dify_conversation_id, conversation_key, status, "incoming"],
+            "kwargs": {"batch_metadata": metadata},
+        }
+
+        try:
+            conversation_numeric_id = int(chatwoot_convo_id)
+        except (TypeError, ValueError):
+            conversation_numeric_id = None
+
+        if conversation_numeric_id is not None:
+            apply_kwargs["link"] = tasks.handle_dify_response.s(conversation_id=conversation_numeric_id)
+            apply_kwargs["link_error"] = tasks.handle_dify_error.s(conversation_id=conversation_numeric_id)
+
+        tasks.process_message_with_dify.apply_async(**apply_kwargs)
+
+        async with self._lock:
+            state = self._buffers.get(conversation_key)
+            if state:
+                state.dify_conversation_id = dify_conversation_id
+                if not state.messages and not state.is_typing and state.timer_task is None:
+                    # Clean up fully processed buffer
+                    self._buffers.pop(conversation_key, None)
+
+    @staticmethod
+    def _combine_content(buffered_messages: List[BufferedMessage]) -> str:
+        return "\n\n".join(msg.content.strip() for msg in buffered_messages if msg.content) or ""
+
+
+# Global message aggregator instance
+message_aggregator = ChatwootMessageAggregator(
+    cooldown_seconds=CHATWOOT_MESSAGE_DEBOUNCE_SECONDS,
+    session_factory=get_async_session,
+)
+
+
+async def update_typing_buffer_state(
+    db: AsyncSession,
+    webhook_data: ChatwootWebhook,
+    *,
+    is_typing: bool,
+):
+    """Update aggregator typing state while ensuring conversation linkage."""
+    conversation_id = webhook_data.conversation_id
+    if conversation_id is None:
+        logger.warning("Typing event without conversation id: %s", webhook_data.event)
+        return
+
+    conversation_key = str(conversation_id)
+    conversation_db_id: Optional[int] = None
+    dify_conversation_id: Optional[str] = None
+
+    statement = select(Conversation).where(Conversation.chatwoot_conversation_id == conversation_key)
+    result = await db.execute(statement)
+    conversation = result.scalar_one_or_none()
+
+    if conversation:
+        conversation_db_id = conversation.id
+        dify_conversation_id = conversation.dify_conversation_id
+
+    await message_aggregator.set_typing_state(
+        conversation_key=conversation_key,
+        is_typing=is_typing,
+        conversation_db_id=conversation_db_id,
+        dify_conversation_id=dify_conversation_id,
+    )
 
 async def get_or_create_conversation(db: AsyncSession, data: ConversationCreate) -> Conversation:
     """
@@ -131,53 +428,95 @@ async def chatwoot_webhook(
                 logger.info(f"Skipping agent_bot message: {webhook_data.content}")
                 return {"status": "skipped", "reason": "agent_bot message"}
 
-            if str(webhook_data.content).startswith(BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL) or str(
-                webhook_data.content
+            content_to_compare = webhook_data.content or ""
+            if str(content_to_compare).startswith(BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL) or str(
+                content_to_compare
             ).startswith(BOT_ERROR_MESSAGE_INTERNAL):
-                logger.info(f"Skipping agent_bot message: {webhook_data.content}")
+                logger.info(f"Skipping agent_bot message: {content_to_compare}")
                 return {"status": "skipped", "reason": "agent_bot message"}
 
-            if True:  # we'll see if we need to filter by status later
-                print(f"Processing message: {webhook_data}")
-                try:
-                    conversation_data = webhook_data.to_conversation_create()
-                    conversation = await get_or_create_conversation(db, conversation_data)
-
-                    # Start the task and return immediately
-                    tasks.process_message_with_dify.apply_async(
-                        args=[
-                            webhook_data.content,
-                            conversation.dify_conversation_id,
-                            conversation.chatwoot_conversation_id,
-                            conversation.status,
-                            webhook_data.message_type,
-                        ],
-                        link=tasks.handle_dify_response.s(
-                            conversation_id=webhook_data.conversation_id,
-                        ),
-                        link_error=tasks.handle_dify_error.s(
-                            conversation_id=webhook_data.conversation_id,
-                        ),
+            print(f"Processing message: {webhook_data}")
+            try:
+                message_type = webhook_data.effective_message_type
+                if message_type != "incoming":
+                    logger.info(
+                        "Skipping non-incoming message for conversation %s (type=%s)",
+                        webhook_data.conversation_id,
+                        message_type,
                     )
+                    return {"status": "skipped", "reason": "non_incoming_message"}
 
-                    return {"status": "processing"}
+                if not webhook_data.message or webhook_data.message.id is None:
+                    logger.warning(
+                        "Received message_created event without message payload: %s",
+                        webhook_data,
+                    )
+                    return {"status": "skipped", "reason": "missing_message_payload"}
 
-                except Exception as e:
-                    logger.error(f"Failed to process message with Dify: {e}", exc_info=True)
+                conversation_data = webhook_data.to_conversation_create()
+                conversation = await get_or_create_conversation(db, conversation_data)
 
-                    # Try to send error message to Chatwoot if conversation_id is available
-                    if webhook_data and webhook_data.conversation_id is not None:
-                        try:
-                            await chatwoot.send_message(
-                                conversation_id=webhook_data.conversation_id,
-                                message=BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
-                                private=False,
-                            )
-                        except Exception as send_error:
-                            logger.error(f"Failed to send error message to Chatwoot: {send_error}")
+                message_id_str = str(webhook_data.message.id)
+                existing_stmt = select(ChatwootUserMessage).where(
+                    ChatwootUserMessage.chatwoot_message_id == message_id_str
+                )
+                existing_record = await db.execute(existing_stmt)
+                if existing_record.scalar_one_or_none():
+                    logger.info(
+                        "Skipping duplicate Chatwoot message %s for conversation %s",
+                        message_id_str,
+                        conversation.chatwoot_conversation_id,
+                    )
+                    return {"status": "skipped", "reason": "duplicate_message"}
 
-                    # Re-raise the original exception to trigger proper error handling
-                    raise
+                message_content = (webhook_data.message.content or "").strip()
+                fallback_content = (webhook_data.content or "").strip()
+                combined_content = message_content or fallback_content
+
+                user_message_record = ChatwootUserMessage(
+                    conversation_id=conversation.id,
+                    chatwoot_message_id=message_id_str,
+                    content=combined_content,
+                )
+                db.add(user_message_record)
+                await db.flush()
+
+                await message_aggregator.add_message(
+                    conversation_key=conversation.chatwoot_conversation_id,
+                    conversation_db_id=conversation.id,
+                    dify_conversation_id=conversation.dify_conversation_id,
+                    message_record_id=user_message_record.id,
+                    chatwoot_message_id=message_id_str,
+                    content=combined_content,
+                )
+
+                print(
+                    f"Buffered Chatwoot message {message_id_str} for conversation {conversation.chatwoot_conversation_id}"
+                )
+                return {"status": "queued"}
+
+            except Exception as e:
+                logger.error(f"Failed to queue message for Dify aggregation: {e}", exc_info=True)
+
+                if webhook_data and webhook_data.conversation_id is not None:
+                    try:
+                        await chatwoot.send_message(
+                            conversation_id=webhook_data.conversation_id,
+                            message=BOT_CONVERSATION_OPENED_MESSAGE_EXTERNAL,
+                            private=False,
+                        )
+                    except Exception as send_error:
+                        logger.error(f"Failed to send error message to Chatwoot: {send_error}")
+
+                raise
+
+        elif webhook_data.event == "conversation_typing_on":
+            await update_typing_buffer_state(db, webhook_data, is_typing=True)
+            return {"status": "acknowledged"}
+
+        elif webhook_data.event == "conversation_typing_off":
+            await update_typing_buffer_state(db, webhook_data, is_typing=False)
+            return {"status": "acknowledged"}
 
         elif webhook_data.event == "conversation_created":
             if not webhook_data.conversation:
