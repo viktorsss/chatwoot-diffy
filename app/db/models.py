@@ -39,9 +39,9 @@ class ChatwootMessageBatch(Base):
     id: Mapped[int] = mapped_column(primary_key=True, init=False, autoincrement=True)
     batch_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     conversation_id: Mapped[int] = mapped_column(ForeignKey("conversation.id"), nullable=False)
-    dify_conversation_id: Mapped[Optional[str]] = mapped_column(default=None)
     chatwoot_message_ids: Mapped[str] = mapped_column(Text, nullable=False)
     combined_content: Mapped[str] = mapped_column(Text, nullable=False)
+    dify_conversation_id: Mapped[Optional[str]] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         insert_default=lambda: datetime.now(UTC),
