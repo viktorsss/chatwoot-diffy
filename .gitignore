@@ -60,3 +60,4 @@ htmlcov/
 .ruff_cache/
 
 .cursor/
+ERROR_LOGS.txt
