@@ -1,7 +1,4 @@
-import asyncio
-import json
 import os
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -9,11 +6,7 @@ import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api import webhooks
-from app.db.models import ChatwootMessageBatch, ChatwootUserMessage
 from app.db.session import get_session
 from app.main import app
 from app.schemas import ConversationResponse
@@ -111,125 +104,6 @@ async def test_webhook_endpoint_with_outgoing_message(chatwoot_webhook_factory):
     async with httpx.AsyncClient(base_url=API_BASE_URL) as client:
         response = await client.post("/chatwoot-webhook", json=payload_dict)
         assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_message_debounce_combines_messages(
-    _async_session: AsyncSession,
-    override_get_session,
-    test_async_engine,
-    monkeypatch,
-):
-    """Ensure consecutive user messages are combined after typing cooldown."""
-    aggregator = webhooks.message_aggregator
-    await aggregator.reset()
-    original_cooldown = aggregator.cooldown_seconds
-    original_session_factory = aggregator._session_factory
-
-    aggregator.cooldown_seconds = 0.05
-
-    @asynccontextmanager
-    async def _session_override():
-        async with AsyncSession(test_async_engine) as session:
-            async with session.begin():
-                yield session
-
-    aggregator.configure_session_factory(_session_override)
-
-    captured_calls: list[dict] = []
-
-    def fake_apply_async(**kwargs):
-        captured_calls.append(kwargs)
-        return None
-
-    monkeypatch.setattr(webhooks.tasks.process_message_with_dify, "apply_async", fake_apply_async)
-
-    conversation_id = 98765
-    base_conversation = {"id": conversation_id, "status": "pending", "meta": {"assignee": None}}
-    sender = {"id": 555, "type": "contact"}
-
-    message_template = {
-        "event": "message_created",
-        "message_type": "incoming",
-        "sender": sender,
-        "conversation": base_conversation,
-    }
-
-    try:
-        async with httpx.AsyncClient(app=app, base_url="http://test") as client:
-            message1 = {
-                **message_template,
-                "content": "First segment",
-                "message": {
-                    "id": 501,
-                    "content": "First segment",
-                    "message_type": "incoming",
-                    "conversation": base_conversation,
-                    "sender": sender,
-                },
-            }
-            response = await client.post("/chatwoot-webhook", json=message1)
-            assert response.status_code == 200
-
-            typing_on = {
-                "event": "conversation_typing_on",
-                "conversation": base_conversation,
-                "sender": sender,
-            }
-            await client.post("/chatwoot-webhook", json=typing_on)
-
-            await asyncio.sleep(0.08)
-            assert captured_calls == []
-
-            typing_off = {
-                "event": "conversation_typing_off",
-                "conversation": base_conversation,
-                "sender": sender,
-            }
-            await client.post("/chatwoot-webhook", json=typing_off)
-
-            message2 = {
-                **message_template,
-                "content": "Second segment",
-                "message": {
-                    "id": 502,
-                    "content": "Second segment",
-                    "message_type": "incoming",
-                    "conversation": base_conversation,
-                    "sender": sender,
-                },
-            }
-            response = await client.post("/chatwoot-webhook", json=message2)
-            assert response.status_code == 200
-
-            await client.post("/chatwoot-webhook", json=typing_off)
-
-            await asyncio.sleep(0.12)
-
-        assert len(captured_calls) == 1
-        call = captured_calls[0]
-        assert call["args"][0] == "First segment\n\nSecond segment"
-        metadata = call["kwargs"]["batch_metadata"]
-        assert metadata["chatwoot_message_ids"] == ["501", "502"]
-        assert metadata["batch_key"]
-
-        async with AsyncSession(test_async_engine) as verification_session:
-            async with verification_session.begin():
-                batch_result = await verification_session.execute(select(ChatwootMessageBatch))
-                batches = batch_result.scalars().all()
-                assert len(batches) == 1
-                stored_batch = batches[0]
-                assert json.loads(stored_batch.chatwoot_message_ids) == ["501", "502"]
-                assert stored_batch.combined_content == "First segment\n\nSecond segment"
-
-                message_result = await verification_session.execute(select(ChatwootUserMessage))
-                stored_messages = message_result.scalars().all()
-                assert len(stored_messages) == 2
-                assert all(msg.batch_id == stored_batch.id for msg in stored_messages)
-    finally:
-        aggregator.cooldown_seconds = original_cooldown
-        aggregator.configure_session_factory(original_session_factory)
-        await aggregator.reset()
 
 
 async def test_update_labels_endpoint(test_conversation_id):

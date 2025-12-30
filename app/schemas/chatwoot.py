@@ -59,10 +59,7 @@ class ChatwootWebhook(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     
     event: str = Field(..., description="Webhook event type")
-    message_type: Optional[Literal["incoming", "outgoing"]] = Field(
-        default=None,
-        description="Message direction type supplied for message events",
-    )
+    message_type: Literal["incoming", "outgoing"] = Field(..., description="Message direction type")
     sender: Optional[ChatwootSender] = Field(default=None, description="Sender from payload root")
     message: Optional[ChatwootMessage] = Field(default=None, description="Message data")
     conversation: Optional[ChatwootConversation] = Field(default=None, description="Conversation data")
@@ -100,12 +97,6 @@ class ChatwootWebhook(BaseModel):
     def derived_message_type(self) -> Optional[str]:
         """Get message type from the nested message object."""
         return self.message.message_type if self.message else None
-    
-    @computed_field
-    @property
-    def effective_message_type(self) -> Optional[str]:
-        """Prefer explicit message_type but fall back to derived value."""
-        return self.message_type or self.derived_message_type
 
     @computed_field
     @property
